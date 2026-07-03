@@ -1,26 +1,22 @@
-// Configuración de Supabase
-const supabaseUrl = 'https://nhrncnxtwcwdybptiirr.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ocm5jbnh0d2N3ZHlicHRpaXJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MDU3NDcsImV4cCI6MjA5NzM4MTc0N30.GDUZyAxlFAga8j9GHlocodS_NrMKzjQEHc8FdO0AkjM';
-const supabase = supabaseClient.createClient(supabaseUrl, supabaseKey);
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Sistema Atlético Balboa</title>
+</head>
+<body>
+    <h1>Sistema Atlético Balboa</h1>
+    <form id="transaccionForm">
+        <input type="text" id="concepto" placeholder="Concepto" required>
+        <input type="number" id="monto" placeholder="Monto" required>
+        <select id="tipo">
+            <option value="ingreso">Ingreso</option>
+            <option value="egreso">Egreso</option>
+        </select>
+        <button type="submit">Guardar</button>
+    </form>
 
-const form = document.getElementById('transaccionForm');
-
-form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const { data, error } = await supabase
-        .from('transacciones')
-        .insert([{
-            concepto: document.getElementById('concepto').value,
-            monto: document.getElementById('monto').value,
-            tipo: document.getElementById('tipo').value,
-            categoria_id: 1 // Por ahora fijo
-        }]);
-
-    if (error) {
-        alert('Error al guardar: ' + error.message);
-    } else {
-        alert('Transacción guardada exitosamente');
-        form.reset();
-    }
-});
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js"></script>
+</body>
+</html>
