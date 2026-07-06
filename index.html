@@ -2,19 +2,24 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Sistema Atlético Balboa</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LexFlow PRO - Atlético Balboa</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Sistema Atlético Balboa</h1>
-    <form id="transaccionForm">
-        <input type="text" id="concepto" placeholder="Concepto" required>
-        <input type="number" id="monto" placeholder="Monto" required>
-        <select id="tipo">
-            <option value="ingreso">Ingreso</option>
-            <option value="egreso">Egreso</option>
-        </select>
-        <button type="submit">Guardar</button>
-    </form>
+    <div class="container">
+        <h1>Registrar Movimiento</h1>
+        <form id="transaccionForm">
+            <input type="date" id="fecha" required>
+            <input type="text" id="concepto" placeholder="Concepto (Ej: Venta boletos)" required>
+            <input type="number" id="monto" placeholder="Monto ($)" required>
+            <select id="tipo">
+                <option value="ingreso">Ingreso</option>
+                <option value="egreso">Egreso</option>
+            </select>
+            <button type="submit">Registrar Operación</button>
+        </form>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js"></script>
