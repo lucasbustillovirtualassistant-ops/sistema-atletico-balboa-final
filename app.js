@@ -1,35 +1,25 @@
-// Estas líneas leen las variables que acabas de configurar en Vercel
-const supabaseUrl = process.env.SUPABASE_URL; 
-const supabaseKey = process.env.SUPABASE_KEY;
+// Inicialización segura y única
+const supabase = supabaseClient.createClient(
+    'https://nhrncnxtwcwdybptiirr.supabase.co', 
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ocm5jbnh0d2N3ZHlicHRpaXJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MDU3NDcsImV4cCI6MjA5NzM4MTc0N30.GDUZyAxlFAga8j9GHlocodS_NrMKzjQEHc8FdO0AkjM'
+);
 
-const supabase = supabaseClient.createClient(supabaseUrl, supabaseKey);
-
-// 2. Lógica del formulario
-const form = document.getElementById('transaccionForm');
-
-form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    // Captura de valores
-    const concepto = document.getElementById('concepto').value;
-    const monto = document.getElementById('monto').value;
-    const tipo = document.getElementById('tipo').value;
-    
-    // Inserción en base de datos
-    const { data, error } = await supabase
-        .from('transacciones')
-        .insert([{
-            concepto: concepto,
-            monto: monto,
-            tipo: tipo,
-            categoria_id: 1 // Asegúrate de que este valor exista en tu tabla o sea NULL
-        }]);
-
-    if (error) {
-        console.error('Error detallado:', error);
-        alert('Error al guardar: ' + error.message);
-    } else {
-        alert('Transacción guardada exitosamente');
-        form.reset();
+// Lógica del formulario
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('transaccionForm');
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const { data, error } = await supabase.from('transacciones').insert([{
+                fecha: document.getElementById('fecha').value,
+                concepto: document.getElementById('concepto').value,
+                monto: document.getElementById('monto').value,
+                tipo: document.getElementById('tipo').value,
+                categoria_id: 1
+            }]);
+            
+            if (error) alert('Error: ' + error.message);
+            else { alert('¡Guardado!'); form.reset(); }
+        });
     }
 });
