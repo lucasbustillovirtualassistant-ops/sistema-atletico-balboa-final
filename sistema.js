@@ -1,7 +1,7 @@
-// Inicialización segura y única
-const supabase = supabaseClient.createClient(
+// La librería global se llama 'supabase' directamente
+const supabase = supabase.createClient(
     'https://nhrncnxtwcwdybptiirr.supabase.co', 
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ocm5jbnh0d2N3ZHlicHRpaXJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MDU3NDcsImV4cCI6MjA5NzM4MTc0N30.GDUZyAxlFAga8j9GHlocodS_NrMKzjQEHc8FdO0AkjM'
+    'TU_CLAVE_PUBLICA_AQUI'
 );
 
 // Lógica del formulario
