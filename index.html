@@ -2,22 +2,201 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema Atlético Balboa</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- 1) Librería de Supabase (versión fija). Expone window.supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+    <!-- 2) Nuestro código. Con "defer" se ejecuta DESPUÉS del CDN, en este orden, con el HTML ya cargado -->
+    <script src="js/sistema.js" defer></script>
 </head>
 <body>
-    <h1>Sistema Atlético Balboa</h1>
-    <form id="transaccionForm">
-        <input type="date" id="fecha" required>
-        <input type="text" id="concepto" placeholder="Concepto" required>
-        <input type="number" id="monto" placeholder="Monto" required>
-        <select id="tipo">
-            <option value="ingreso">Ingreso</option>
-            <option value="egreso">Egreso</option>
-        </select>
-        <button type="submit">Registrar Operación</button>
-    </form>
+    <header class="topbar">
+        <h1>Atlético Balboa <span>Control Financiero</span></h1>
+        <div id="sesion" class="sesion" hidden>
+            <span id="usuarioEmail"></span>
+            <button type="button" id="btnSalir">Salir</button>
+        </div>
+    </header>
 
-    <script src="sistema.js"></script>
+    <!-- Pantalla de acceso: visible solo sin sesión iniciada -->
+    <main id="pantallaLogin" class="angosto" hidden>
+        <form id="loginForm" class="tarjeta">
+            <h2>Iniciar sesión</h2>
+            <label>Correo
+                <input type="email" id="loginEmail" autocomplete="username" required>
+            </label>
+            <label>Contraseña
+                <input type="password" id="loginPassword" autocomplete="current-password" required>
+            </label>
+            <button type="submit" id="btnEntrar">Entrar</button>
+            <p id="loginMensaje" class="mensaje" role="status"></p>
+        </form>
+    </main>
+
+    <!-- Aplicación: visible solo con sesión iniciada y rol asignado.
+         data-roles indica qué roles ven cada sección. -->
+    <div id="app" hidden>
+    <nav class="nav">
+        <a href="#dashboard" data-seccion="dashboard" data-roles="dueno gerente">Dashboard</a>
+        <a href="#movimientos" data-seccion="movimientos" data-roles="dueno gerente secretaria">Movimientos</a>
+        <a href="#planilla" data-seccion="planilla" data-roles="dueno gerente">Planilla</a>
+        <a href="#reportes" data-seccion="reportes" data-roles="dueno gerente">Reportes</a>
+        <a href="#ajustes" data-seccion="ajustes" data-roles="dueno">Ajustes</a>
+        <a href="#cuenta" data-seccion="cuenta" data-roles="dueno gerente secretaria">Mi cuenta</a>
+    </nav>
+
+    <main>
+        <section id="dashboard" class="seccion">
+            <h2>Panel de Control</h2>
+            <p class="pronto">Próximamente: gráficos de ingresos vs. egresos y saldo en caja.</p>
+        </section>
+
+        <section id="movimientos" class="seccion">
+            <h2>Registrar Movimiento</h2>
+            <form id="transaccionForm" class="tarjeta angosto">
+                <label>Tipo
+                    <select id="tipo" required>
+                        <option value="ingreso">Ingreso</option>
+                        <option value="egreso">Egreso</option>
+                    </select>
+                </label>
+                <label>Fecha
+                    <input type="date" id="fecha" required>
+                </label>
+                <label>Concepto
+                    <input type="text" id="concepto" placeholder="Ej. Taquilla jornada 5" maxlength="200" required>
+                </label>
+                <label>Monto
+                    <input type="number" id="monto" min="0.01" step="0.01" placeholder="0.00" required>
+                </label>
+                <label>Categoría
+                    <select id="categoria" required></select>
+                </label>
+                <button type="submit" id="btnGuardar">Registrar Movimiento</button>
+                <p id="mensaje" class="mensaje" role="status"></p>
+            </form>
+
+            <h2 id="tituloHistorial">Historial</h2>
+            <div class="tarjeta">
+                <form id="filtrosForm" class="filtros">
+                    <label>Desde <input type="date" id="fDesde"></label>
+                    <label>Hasta <input type="date" id="fHasta"></label>
+                    <label>Tipo
+                        <select id="fTipo">
+                            <option value="">Todos</option>
+                            <option value="ingreso">Ingresos</option>
+                            <option value="egreso">Egresos</option>
+                        </select>
+                    </label>
+                    <label>Categoría <select id="fCategoria"></select></label>
+                    <label class="check"><input type="checkbox" id="fAnuladas"> Mostrar anulados</label>
+                    <button type="submit">Filtrar</button>
+                </form>
+
+                <div class="totales" id="totales"></div>
+
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th><th>Concepto</th><th>Categoría</th>
+                                <th class="num">Monto</th><th>Registró</th><th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="historial"></tbody>
+                    </table>
+                </div>
+                <p id="historialMensaje" class="mensaje" role="status"></p>
+            </div>
+        </section>
+
+        <section id="planilla" class="seccion">
+            <h2>Control de Planilla</h2>
+            <p class="pronto">Próximamente: pago de salarios a jugadores y cuerpo técnico.</p>
+        </section>
+
+        <section id="reportes" class="seccion">
+            <h2>Reportes</h2>
+            <p class="pronto">Próximamente: exportación de cortes de caja a Excel y PDF.</p>
+        </section>
+
+        <section id="ajustes" class="seccion">
+            <h2>Nuevo usuario</h2>
+            <div class="tarjeta">
+                <form id="nuevoUsuarioForm" class="filtros">
+                    <label>Correo <input type="email" id="nuEmail" autocomplete="off" required></label>
+                    <label>Nombre <input type="text" id="nuNombre" maxlength="80" placeholder="Ej. María López"></label>
+                    <label>Rol
+                        <select id="nuRol">
+                            <option value="secretaria">Secretaria</option>
+                            <option value="gerente">Gerente</option>
+                            <option value="dueno">Dueño</option>
+                        </select>
+                    </label>
+                    <label>Contraseña temporal
+                        <span class="con-boton">
+                            <input type="text" id="nuClave" minlength="10" autocomplete="off" required>
+                            <button type="button" class="btn-chico" id="btnGenerarClave">Generar</button>
+                        </span>
+                    </label>
+                    <button type="submit" id="btnCrearUsuario">Crear usuario</button>
+                </form>
+                <p class="ayuda">Entrégale el correo y la contraseña temporal en persona o por un medio privado.
+                    Al entrar, la persona puede cambiarla en "Mi cuenta".</p>
+                <p id="nuevoUsuarioMensaje" class="mensaje" role="status"></p>
+            </div>
+
+            <h2>Usuarios</h2>
+            <div class="tarjeta">
+                <p class="ayuda">Desactivar a alguien le quita el acceso de inmediato, pero sus movimientos quedan en el historial.</p>
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead><tr><th>Correo</th><th>Nombre</th><th>Rol</th><th>Activo</th><th></th></tr></thead>
+                        <tbody id="usuarios"></tbody>
+                    </table>
+                </div>
+                <p id="usuariosMensaje" class="mensaje" role="status"></p>
+            </div>
+
+            <h2>Categorías</h2>
+            <div class="tarjeta">
+                <form id="categoriaForm" class="filtros">
+                    <label>Nombre <input type="text" id="nuevaCategoria" maxlength="80" required></label>
+                    <label>Tipo
+                        <select id="nuevaCategoriaTipo">
+                            <option value="ingreso">Ingreso</option>
+                            <option value="egreso">Egreso</option>
+                        </select>
+                    </label>
+                    <button type="submit">Agregar categoría</button>
+                </form>
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead><tr><th>Categoría</th><th>Tipo</th><th>Estado</th><th></th></tr></thead>
+                        <tbody id="categorias"></tbody>
+                    </table>
+                </div>
+                <p id="categoriasMensaje" class="mensaje" role="status"></p>
+            </div>
+        </section>
+
+        <section id="cuenta" class="seccion">
+            <h2>Mi cuenta</h2>
+            <form id="claveForm" class="tarjeta angosto">
+                <p class="ayuda" id="cuentaDatos"></p>
+                <label>Nueva contraseña
+                    <input type="password" id="claveNueva" minlength="10" autocomplete="new-password" required>
+                </label>
+                <label>Repite la nueva contraseña
+                    <input type="password" id="claveRepetir" minlength="10" autocomplete="new-password" required>
+                </label>
+                <button type="submit" id="btnCambiarClave">Cambiar contraseña</button>
+                <p id="claveMensaje" class="mensaje" role="status"></p>
+            </form>
+        </section>
+    </main>
+    </div>
 </body>
 </html>

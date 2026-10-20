@@ -1,0 +1,70 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #f4f5f9; color: #1f2937; }
+
+.topbar { background: #0b2a5b; color: white; padding: 16px 20px; }
+.topbar h1 { margin: 0; font-size: 1.3rem; }
+.topbar span { display: block; font-size: 0.85rem; font-weight: normal; opacity: 0.8; }
+
+.nav { display: flex; gap: 4px; background: white; padding: 0 12px; border-bottom: 1px solid #e5e7eb; overflow-x: auto; }
+.nav a { padding: 12px 14px; color: #4b5563; text-decoration: none; border-bottom: 3px solid transparent; white-space: nowrap; }
+.nav a.activo { color: #0b2a5b; border-bottom-color: #0b2a5b; font-weight: 600; }
+
+main { max-width: 1000px; margin: 0 auto; padding: 20px 16px; }
+.angosto { max-width: 520px; margin-left: auto; margin-right: auto; }
+.seccion { display: none; }
+.seccion.activa { display: block; }
+.pronto { color: #6b7280; }
+
+.tarjeta { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); }
+label { display: block; margin-bottom: 14px; font-size: 0.9rem; font-weight: 600; }
+input, select { display: block; width: 100%; margin-top: 4px; padding: 10px; font: inherit; font-weight: normal; border: 1px solid #d1d5db; border-radius: 4px; }
+button { width: 100%; padding: 12px; font: inherit; background: #0b2a5b; color: white; border: none; border-radius: 4px; cursor: pointer; }
+button:hover { background: #081f44; }
+button:disabled { opacity: 0.6; cursor: wait; }
+
+.mensaje { margin: 12px 0 0; min-height: 1.2em; font-size: 0.9rem; }
+.mensaje.ok { color: #15803d; }
+.mensaje.error { color: #b91c1c; }
+
+[hidden] { display: none !important; }
+.topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.sesion { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; min-width: 0; }
+.sesion span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sesion button { width: auto; padding: 6px 12px; background: rgba(255, 255, 255, 0.15); }
+.sesion button:hover { background: rgba(255, 255, 255, 0.25); }
+#loginForm h2 { margin-top: 0; }
+.seccion h2 { margin-top: 28px; }
+.seccion h2:first-child { margin-top: 0; }
+.ayuda { color: #6b7280; font-size: 0.9rem; margin-top: 0; }
+
+.filtros { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 16px; }
+.filtros label { margin: 0; flex: 1 1 140px; }
+.filtros button { width: auto; flex: 0 0 auto; }
+label.check { display: flex; align-items: center; gap: 6px; font-weight: normal; padding-bottom: 10px; }
+label.check input { width: auto; margin: 0; }
+
+.totales { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.totales div { background: #f4f5f9; border-radius: 6px; padding: 10px; }
+.totales span { display: block; font-size: 0.8rem; color: #6b7280; }
+.totales strong { font-size: 1.1rem; }
+
+.tabla-scroll { overflow-x: auto; }
+.tabla { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.tabla th { text-align: left; font-size: 0.8rem; color: #6b7280; border-bottom: 2px solid #e5e7eb; padding: 8px; white-space: nowrap; }
+.tabla td { border-bottom: 1px solid #e5e7eb; padding: 8px; vertical-align: top; }
+.tabla td input, .tabla td select { margin: 0; padding: 6px; min-width: 120px; }
+.tabla td input[type="checkbox"] { width: auto; min-width: 0; }
+.tabla .num { text-align: right; white-space: nowrap; }
+.tabla .registro { font-size: 0.8rem; color: #6b7280; }
+.tabla tr.anulada td { color: #9ca3af; }
+.tabla tr.anulada td.num { text-decoration: line-through; }
+.ingreso { color: #15803d; }
+.egreso { color: #b91c1c; }
+.nota { font-size: 0.8rem; color: #b45309; margin-top: 4px; }
+.btn-chico { width: auto; padding: 4px 10px; font-size: 0.8rem; }
+.con-boton { display: flex; gap: 6px; align-items: stretch; margin-top: 4px; }
+.con-boton input { margin-top: 0; }
+.btn-chico.secundario { background: #e5e7eb; color: #1f2937; }
+.btn-chico.secundario:hover { background: #d1d5db; }
+.tabla td.acciones { white-space: nowrap; }
+.tabla td.acciones .btn-chico + .btn-chico { margin-left: 4px; }
