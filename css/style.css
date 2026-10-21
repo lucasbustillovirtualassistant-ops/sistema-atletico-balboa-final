@@ -99,3 +99,25 @@ summary { cursor: pointer; color: #0b2a5b; }
 .barra-cat-texto small { color: #6b7280; font-weight: normal; }
 .barra-cat-fondo { background: #f4f5f9; border-radius: 4px; height: 10px; }
 .barra-cat-fondo i { display: block; height: 100%; border-radius: 4px; min-width: 4px; }
+
+/* Reportes */
+.atajos { margin: 0; gap: 6px; }
+.reporte { margin-top: 20px; }
+.reporte h3 { margin: 20px 0 8px; font-size: 1rem; }
+.reporte-cabecera { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.reporte-cabecera h2 { margin: 0 0 4px; }
+.reporte-cabecera .acciones { display: flex; gap: 6px; }
+.totales.cuatro { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.tabla tr.total td { font-weight: 600; border-top: 2px solid #e5e7eb; }
+.pie-reporte { margin-top: 16px; font-size: 0.8rem; }
+
+/* Al imprimir (o guardar como PDF) solo sale el reporte */
+@media print {
+    body { background: white; }
+    .topbar, .nav, .no-imprimir, #reporteMensaje { display: none !important; }
+    main { padding: 0; max-width: none; }
+    .tarjeta { box-shadow: none; padding: 0; }
+    .tabla-scroll { overflow: visible; }
+    .tabla tr { break-inside: avoid; }
+    .totales div { border: 1px solid #e5e7eb; }
+}

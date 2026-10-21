@@ -162,8 +162,57 @@
         </section>
 
         <section id="reportes" class="seccion">
-            <h2>Reportes</h2>
-            <p class="pronto">Próximamente: exportación de cortes de caja a Excel y PDF.</p>
+            <h2 class="no-imprimir">Corte de caja</h2>
+            <div class="tarjeta no-imprimir">
+                <form id="reporteForm" class="filtros">
+                    <label>Desde <input type="date" id="rDesde" required></label>
+                    <label>Hasta <input type="date" id="rHasta" required></label>
+                    <button type="submit" id="btnReporte">Generar</button>
+                </form>
+                <div class="filtros atajos">
+                    <button type="button" class="btn-chico secundario" data-rango="mes">Este mes</button>
+                    <button type="button" class="btn-chico secundario" data-rango="anterior">Mes anterior</button>
+                    <button type="button" class="btn-chico secundario" data-rango="anio">Este año</button>
+                </div>
+                <p id="reporteMensaje" class="mensaje" role="status"></p>
+            </div>
+
+            <div id="reporte" class="tarjeta reporte" hidden>
+                <div class="reporte-cabecera">
+                    <div>
+                        <h2>Atlético Balboa — Corte de caja</h2>
+                        <p class="ayuda" id="reportePeriodo"></p>
+                    </div>
+                    <div class="acciones no-imprimir">
+                        <button type="button" class="btn-chico" id="btnExcel">Descargar Excel</button>
+                        <button type="button" class="btn-chico" id="btnPdf">Imprimir / PDF</button>
+                    </div>
+                </div>
+
+                <div class="totales cuatro" id="reporteTotales"></div>
+
+                <div class="columnas">
+                    <div>
+                        <h3>Ingresos por categoría</h3>
+                        <table class="tabla"><tbody id="reporteCatIngresos"></tbody></table>
+                    </div>
+                    <div>
+                        <h3>Egresos por categoría</h3>
+                        <table class="tabla"><tbody id="reporteCatEgresos"></tbody></table>
+                    </div>
+                </div>
+
+                <h3>Detalle de movimientos</h3>
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead>
+                            <tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th class="num">Monto</th><th>Registró</th></tr>
+                        </thead>
+                        <tbody id="reporteDetalle"></tbody>
+                    </table>
+                </div>
+                <p class="ayuda pie-reporte" id="reportePie"></p>
+            </div>
         </section>
 
         <section id="ajustes" class="seccion">

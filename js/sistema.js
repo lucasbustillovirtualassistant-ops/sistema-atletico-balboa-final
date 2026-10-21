@@ -404,6 +404,192 @@
 
     $('periodo').addEventListener('change', pintarCategoriasPeriodo);
 
+    // ---- Reportes: corte de caja entre dos fechas (dueño y gerente) ----
+    let reporte = null; // último reporte generado, para exportarlo
+
+    function fijarRango(rango) {
+        const [a, m] = hoy().split('-').map(Number);
+        const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        let desde, hasta;
+        if (rango === 'mes') { desde = new Date(a, m - 1, 1); hasta = new Date(a, m, 0); }
+        if (rango === 'anterior') { desde = new Date(a, m - 2, 1); hasta = new Date(a, m - 1, 0); }
+        if (rango === 'anio') { desde = new Date(a, 0, 1); hasta = new Date(a, 11, 31); }
+        $('rDesde').value = iso(desde);
+        $('rHasta').value = iso(hasta);
+    }
+    fijarRango('mes');
+
+    document.querySelector('.atajos').addEventListener('click', (e) => {
+        if (!e.target.dataset.rango) return;
+        fijarRango(e.target.dataset.rango);
+        generarReporte();
+    });
+
+    $('reporteForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        generarReporte();
+    });
+
+    // Supabase entrega como máximo 1000 filas por consulta; se piden por páginas.
+    async function movimientosDelPeriodo(desde, hasta) {
+        const PAGINA = 1000;
+        let todos = [];
+        for (let inicio = 0; ; inicio += PAGINA) {
+            const { data, error } = await db
+                .from('transacciones')
+                .select('id, fecha, concepto, monto, tipo, categoria_id, registrado_email')
+                .eq('anulada', false)
+                .gte('fecha', desde)
+                .lte('fecha', hasta)
+                .order('fecha')
+                .order('id')
+                .range(inicio, inicio + PAGINA - 1);
+            if (error) throw error;
+            todos = todos.concat(data);
+            if (data.length < PAGINA) return todos;
+        }
+    }
+
+    async function generarReporte() {
+        const aviso = $('reporteMensaje');
+        const desde = $('rDesde').value;
+        const hasta = $('rHasta').value;
+        if (!desde || !hasta || desde > hasta) {
+            avisar(aviso, 'Revisa las fechas: "Desde" debe ser anterior o igual a "Hasta".', 'error');
+            return;
+        }
+
+        $('btnReporte').disabled = true;
+        avisar(aviso, 'Generando...');
+        try {
+            const [movs, saldo] = await Promise.all([
+                movimientosDelPeriodo(desde, hasta),
+                db.rpc('saldo_al', { p_fecha: desde })
+            ]);
+            if (saldo.error) throw saldo.error;
+            reporte = { desde, hasta, movs, saldoInicial: Number(saldo.data), generado: new Date() };
+        } catch (error) {
+            console.error('Error al generar el reporte:', error);
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        } finally {
+            $('btnReporte').disabled = false;
+        }
+        avisar(aviso, '');
+        pintarReporte();
+    }
+
+    function totalesReporte(r) {
+        const suma = (t) => r.movs.filter(m => m.tipo === t).reduce((s, m) => s + Number(m.monto), 0);
+        const ingresos = suma('ingreso');
+        const egresos = suma('egreso');
+        return { ingresos, egresos, saldoFinal: r.saldoInicial + ingresos - egresos };
+    }
+
+    // [[nombre de categoría, total], ...] de mayor a menor
+    function porCategoria(movs, t) {
+        const acumulado = {};
+        movs.filter(m => m.tipo === t).forEach(m => {
+            const nombre = nombreCategoria(m.categoria_id);
+            acumulado[nombre] = (acumulado[nombre] || 0) + Number(m.monto);
+        });
+        return Object.entries(acumulado).sort((a, b) => b[1] - a[1]);
+    }
+
+    function filasCategoria(lista) {
+        if (!lista.length) return '<tr><td class="ayuda">Sin movimientos.</td></tr>';
+        const total = lista.reduce((s, [, v]) => s + v, 0);
+        return lista.map(([nombre, valor]) => `<tr><td>${escapar(nombre)}</td><td class="num">${dinero(valor)}</td></tr>`).join('')
+            + `<tr class="total"><td>Total</td><td class="num">${dinero(total)}</td></tr>`;
+    }
+
+    function pintarReporte() {
+        const r = reporte;
+        const t = totalesReporte(r);
+        $('reporte').hidden = false;
+        $('reportePeriodo').textContent = `Del ${fechaCorta(r.desde)} al ${fechaCorta(r.hasta)}`;
+        $('reporteTotales').innerHTML = `
+            <div><span>Saldo inicial</span><strong>${dinero(r.saldoInicial)}</strong></div>
+            <div><span>Ingresos</span><strong class="ingreso">${dinero(t.ingresos)}</strong></div>
+            <div><span>Egresos</span><strong class="egreso">${dinero(t.egresos)}</strong></div>
+            <div><span>Saldo final</span><strong>${dinero(t.saldoFinal)}</strong></div>`;
+        $('reporteCatIngresos').innerHTML = filasCategoria(porCategoria(r.movs, 'ingreso'));
+        $('reporteCatEgresos').innerHTML = filasCategoria(porCategoria(r.movs, 'egreso'));
+        $('reporteDetalle').innerHTML = r.movs.length
+            ? r.movs.map(m => `
+                <tr>
+                    <td>${fechaCorta(m.fecha)}</td>
+                    <td>${escapar(m.concepto)}</td>
+                    <td>${escapar(nombreCategoria(m.categoria_id))}</td>
+                    <td class="num ${m.tipo}">${m.tipo === 'ingreso' ? '+' : '−'}${dinero(m.monto)}</td>
+                    <td class="registro">${escapar(m.registrado_email)}</td>
+                </tr>`).join('')
+            : '<tr><td colspan="5" class="ayuda">No hay movimientos en este periodo.</td></tr>';
+        $('reportePie').textContent = `${r.movs.length} movimientos · No incluye movimientos anulados · `
+            + `Generado por ${perfil.nombre || perfil.email} el ${r.generado.toLocaleString('es')}`;
+    }
+
+    $('btnPdf').addEventListener('click', () => window.print());
+
+    // La librería de Excel solo se descarga la primera vez que alguien exporta.
+    function cargarLibreriaExcel() {
+        if (window.XLSX) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('No se pudo descargar la librería de Excel. Revisa tu conexión.'));
+            document.head.appendChild(s);
+        });
+    }
+
+    $('btnExcel').addEventListener('click', async () => {
+        const r = reporte;
+        if (!r) return;
+        try {
+            await cargarLibreriaExcel();
+        } catch (error) {
+            avisar($('reporteMensaje'), error.message, 'error');
+            return;
+        }
+        const t = totalesReporte(r);
+        const libro = XLSX.utils.book_new();
+
+        const resumen = [
+            ['Atlético Balboa — Corte de caja'],
+            ['Periodo', `${fechaCorta(r.desde)} al ${fechaCorta(r.hasta)}`],
+            [],
+            ['Saldo inicial', r.saldoInicial],
+            ['Ingresos', t.ingresos],
+            ['Egresos', t.egresos],
+            ['Saldo final', t.saldoFinal],
+            [],
+            ['Ingresos por categoría'], ...porCategoria(r.movs, 'ingreso'),
+            [],
+            ['Egresos por categoría'], ...porCategoria(r.movs, 'egreso'),
+            [],
+            ['No incluye movimientos anulados.']
+        ];
+        const hojaResumen = XLSX.utils.aoa_to_sheet(resumen);
+        hojaResumen['!cols'] = [{ wch: 34 }, { wch: 18 }];
+        XLSX.utils.book_append_sheet(libro, hojaResumen, 'Resumen');
+
+        const detalle = [['Fecha', 'Tipo', 'Concepto', 'Categoría', 'Monto (USD)', 'Registró']]
+            .concat(r.movs.map(m => [
+                fechaCorta(m.fecha),
+                m.tipo === 'ingreso' ? 'Ingreso' : 'Egreso',
+                m.concepto,
+                nombreCategoria(m.categoria_id),
+                m.tipo === 'ingreso' ? Number(m.monto) : -Number(m.monto),
+                m.registrado_email
+            ]));
+        const hojaDetalle = XLSX.utils.aoa_to_sheet(detalle);
+        hojaDetalle['!cols'] = [{ wch: 11 }, { wch: 9 }, { wch: 40 }, { wch: 30 }, { wch: 14 }, { wch: 30 }];
+        XLSX.utils.book_append_sheet(libro, hojaDetalle, 'Movimientos');
+
+        XLSX.writeFile(libro, `corte-caja_${r.desde}_a_${r.hasta}.xlsx`);
+    });
+
     // ---- Ajustes: usuarios (solo dueño) ----
     const usuarios = $('usuarios');
     const usuariosMensaje = $('usuariosMensaje');
