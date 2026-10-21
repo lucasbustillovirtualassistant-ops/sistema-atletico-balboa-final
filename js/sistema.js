@@ -132,8 +132,9 @@
         document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('activo', a.dataset.seccion === id));
 
         if (id === 'dashboard') cargarDashboard();
+        if (id === 'planilla') cargarSeccionPlanilla();
         if (id === 'movimientos') cargarHistorial();
-        if (id === 'ajustes') { cargarUsuarios(); pintarCategorias(); }
+        if (id === 'ajustes') { cargarUsuarios(); pintarCategorias(); pintarAjustesDocumentos(); }
         if (id === 'cuenta') $('cuentaDatos').textContent = `${perfil.email} · ${ROLES[perfil.rol]}`;
     }
     window.addEventListener('hashchange', mostrarSeccion);
@@ -216,7 +217,7 @@
 
         let consulta = db
             .from('transacciones')
-            .select('id, fecha, concepto, monto, tipo, categoria_id, registrado_email, anulada, anulada_email, anulada_en, motivo_anulacion')
+            .select('id, fecha, concepto, monto, tipo, categoria_id, registrado_email, anulada, anulada_email, anulada_en, motivo_anulacion, planilla_id')
             .order('fecha', { ascending: false })
             .order('id', { ascending: false })
             .limit(LIMITE_HISTORIAL);
@@ -258,9 +259,10 @@
         const anulacion = m.anulada
             ? `<div class="nota">Anulado por ${escapar(m.anulada_email)} el ${fechaCorta(m.anulada_en.slice(0, 10))}: ${escapar(m.motivo_anulacion)}</div>`
             : '';
-        const boton = !m.anulada && puede('dueno', 'gerente')
-            ? `<button type="button" class="btn-chico" data-anular="${m.id}">Anular</button>`
-            : '';
+        // Los egresos de una planilla pagada se anulan juntos, revirtiendo el pago desde Planilla.
+        let boton = '';
+        if (!m.anulada && m.planilla_id) boton = '<span class="nota">Pago de planilla</span>';
+        else if (!m.anulada && puede('dueno', 'gerente')) boton = `<button type="button" class="btn-chico" data-anular="${m.id}">Anular</button>`;
         return `
             <tr class="${m.anulada ? 'anulada' : ''}">
                 <td>${fechaCorta(m.fecha)}</td>
@@ -588,6 +590,564 @@
         XLSX.utils.book_append_sheet(libro, hojaDetalle, 'Movimientos');
 
         XLSX.writeFile(libro, `corte-caja_${r.desde}_a_${r.hasta}.xlsx`);
+    });
+
+    // ---- Documentos para imprimir (planilla y recibos) ----
+    const CLUB = 'Club Deportivo Atlético Balboa';
+    let ajustes = {}; // datos de quien firma por el club (tabla "ajustes")
+
+    async function cargarAjustes() {
+        const { data, error } = await db.from('ajustes').select('clave, valor');
+        if (error) {
+            console.error('Error al cargar ajustes:', error);
+            return;
+        }
+        ajustes = Object.fromEntries(data.map(a => [a.clave, a.valor]));
+    }
+
+    function membrete(titulo, detalle) {
+        return `
+            <div class="membrete">
+                <img src="img/logo.jpg" alt="">
+                <div>
+                    <strong>${CLUB}</strong>
+                    <span>${escapar(titulo)}</span>
+                    <small>${escapar(detalle)}</small>
+                </div>
+            </div>`;
+    }
+
+    // Arma el documento en #impresion y abre la ventana de imprimir (desde ahí se guarda como PDF).
+    function imprimir(html) {
+        $('impresion').innerHTML = html;
+        document.body.classList.add('imprimiendo');
+        const imagenes = Array.from($('impresion').querySelectorAll('img'));
+        Promise.all(imagenes.map(img => img.complete ? null : new Promise(listo => { img.onload = img.onerror = listo; })))
+            .then(() => window.print());
+    }
+    window.addEventListener('afterprint', () => document.body.classList.remove('imprimiendo'));
+
+    // 538.33 → "QUINIENTOS TREINTA Y OCHO DÓLARES CON 33/100"
+    function montoEnLetras(monto) {
+        const UNIDADES = ['', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez',
+            'once', 'doce', 'trece', 'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte',
+            'veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve'];
+        const DECENAS = ['', '', '', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+        const CENTENAS = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos',
+            'setecientos', 'ochocientos', 'novecientos'];
+        // "uno" se acorta delante de un sustantivo: veintiún mil, un dólar
+        const apocope = (t) => t.replace(/veintiuno$/, 'veintiún').replace(/uno$/, 'un');
+
+        function hasta999(n) {
+            if (n === 100) return 'cien';
+            const r = n % 100;
+            const resto = r < 30 ? UNIDADES[r] : DECENAS[Math.floor(r / 10)] + (r % 10 ? ' y ' + UNIDADES[r % 10] : '');
+            return [CENTENAS[Math.floor(n / 100)], resto].filter(Boolean).join(' ');
+        }
+
+        const centavos = Math.round(Number(monto) * 100);
+        const entero = Math.floor(centavos / 100);
+        const millones = Math.floor(entero / 1e6);
+        const miles = Math.floor(entero / 1000) % 1000;
+        const partes = [];
+        if (millones) partes.push(millones === 1 ? 'un millón' : apocope(hasta999(millones)) + ' millones');
+        if (miles) partes.push(miles === 1 ? 'mil' : apocope(hasta999(miles)) + ' mil');
+        if (entero % 1000) partes.push(hasta999(entero % 1000));
+        const palabras = partes.length ? apocope(partes.join(' ')) : 'cero';
+        return `${palabras} ${entero === 1 ? 'dólar' : 'dólares'} con ${String(centavos % 100).padStart(2, '0')}/100`.toUpperCase();
+    }
+
+    // ---- Planilla mensual (dueño y gerente) ----
+    const GRUPOS = { jugador: 'Jugadores', cuerpo_tecnico: 'Cuerpo técnico', administrativo: 'Administrativos' };
+    const GRUPO_PERSONA = { jugador: 'Jugador', cuerpo_tecnico: 'Cuerpo técnico', administrativo: 'Administrativo' };
+    const ORDEN_GRUPOS = Object.keys(GRUPOS);
+    const FORMAS_PAGO = { efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque', otro: 'Otro' };
+    const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+        'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    // Orden del recibo del club: lo que se suma, y después lo que se resta.
+    const CAMPOS_LINEA = ['salario', 'bonos', 'otros', 'multas', 'isr', 'descuentos'];
+
+    let personal = [];
+    let planilla = null; // fila de "planillas" con sus "lineas", o null si el mes no tiene planilla
+
+    const ordenarPorGrupo = (a, b) =>
+        ORDEN_GRUPOS.indexOf(a.grupo) - ORDEN_GRUPOS.indexOf(b.grupo) || a.nombre.localeCompare(b.nombre, 'es');
+    const periodoElegido = () => `${$('plAnio').value}-${$('plMes').value}-01`;
+    const nombrePeriodo = (iso) => `${MESES_LARGOS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
+    const mayuscula = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    const sumaCampo = (lineas, campo) => lineas.reduce((s, l) => s + Number(l[campo]), 0);
+    const devengado = (l) => Number(l.salario) + Number(l.bonos) + Number(l.otros) - Number(l.multas);
+    const opcionesFormaPago = (actual) => Object.entries(FORMAS_PAGO)
+        .map(([valor, texto]) => `<option value="${valor}" ${actual === valor ? 'selected' : ''}>${texto}</option>`).join('');
+
+    (function llenarSelectoresMes() {
+        const [a, m] = hoy().split('-').map(Number);
+        $('plMes').innerHTML = MESES_LARGOS
+            .map((nombre, i) => `<option value="${String(i + 1).padStart(2, '0')}" ${i + 1 === m ? 'selected' : ''}>${nombre}</option>`)
+            .join('');
+        let anios = '';
+        for (let x = 2025; x <= a + 1; x++) anios += `<option ${x === a ? 'selected' : ''}>${x}</option>`;
+        $('plAnio').innerHTML = anios;
+    })();
+
+    async function cargarSeccionPlanilla() {
+        await Promise.all([cargarPersonal(), cargarAjustes()]);
+        abrirPlanilla();
+    }
+
+    $('planillaMesForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        abrirPlanilla();
+    });
+
+    async function abrirPlanilla() {
+        const aviso = $('planillaMensaje');
+        avisar(aviso, 'Cargando...');
+        const { data, error } = await db
+            .from('planillas')
+            .select('*, lineas:planilla_lineas(*)')
+            .eq('periodo', periodoElegido())
+            .maybeSingle();
+        if (error) {
+            console.error('Error al cargar la planilla:', error);
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        }
+        avisar(aviso, '');
+        planilla = data;
+        if (planilla) planilla.lineas.sort(ordenarPorGrupo);
+        pintarPlanilla();
+    }
+
+    function pintarPlanilla() {
+        $('planillaVacia').hidden = !!planilla;
+        $('planillaDetalle').hidden = !planilla;
+
+        if (!planilla) {
+            const activos = personal.filter(p => p.activo).length;
+            $('planillaVaciaTexto').textContent = activos
+                ? `No hay planilla de ${nombrePeriodo(periodoElegido())}. Se creará con las ${activos} personas activas del personal, con su sueldo, otros/viáticos e ISR de siempre.`
+                : 'Primero agrega al personal del club en la sección "Personal" de abajo.';
+            $('btnCrearPlanilla').hidden = !activos;
+            $('btnCrearPlanilla').textContent = `Crear planilla de ${nombrePeriodo(periodoElegido())}`;
+            return;
+        }
+
+        const editable = planilla.estado === 'borrador';
+        $('planillaEstado').className = 'estado ' + planilla.estado;
+        $('planillaEstado').textContent = editable ? 'Borrador' : 'Pagada';
+        $('planillaEstadoTexto').textContent = editable
+            ? 'Todavía se puede modificar. Al marcarla como pagada se registran los egresos en Movimientos.'
+            : `Pagada el ${fechaCorta(planilla.fecha_pago)} por ${planilla.pagada_email}. Sus egresos ya están en Movimientos.`;
+        $('planillaEdicion').hidden = !editable;
+        $('planillaAyuda').hidden = !editable;
+        $('btnRevertirPlanilla').hidden = editable;
+        if (!$('plFechaPago').value) $('plFechaPago').value = hoy();
+
+        const desactivado = editable ? '' : 'disabled';
+        let filas = '';
+        ORDEN_GRUPOS.forEach(grupo => {
+            const lineas = planilla.lineas.filter(l => l.grupo === grupo);
+            if (!lineas.length) return;
+            filas += `<tr class="grupo"><td colspan="9">${GRUPOS[grupo]} (${lineas.length})</td>
+                <td class="num" id="sub-${grupo}">${dinero(sumaCampo(lineas, 'neto'))}</td><td></td></tr>`;
+            filas += lineas.map(l => `
+                <tr data-linea="${l.id}">
+                    <td>${escapar(l.nombre)}<small>${escapar(l.cargo)}</small></td>
+                    ${CAMPOS_LINEA.map(c => `<td><input type="number" min="0" step="0.01" data-campo="${c}" value="${Number(l[c])}" ${desactivado}></td>`).join('')}
+                    <td><select data-campo="forma_pago" ${desactivado}>${opcionesFormaPago(l.forma_pago)}</select></td>
+                    <td><input type="text" class="p-nota" data-campo="nota" maxlength="200" value="${escapar(l.nota)}" ${desactivado}></td>
+                    <td class="num"><strong data-neto>${dinero(l.neto)}</strong></td>
+                    <td class="acciones">
+                        <button type="button" class="btn-chico secundario" data-recibo>Recibo</button>
+                        ${editable ? '<button type="button" class="btn-chico secundario" data-quitar>Quitar</button>' : ''}
+                    </td>
+                </tr>`).join('');
+        });
+        $('planillaLineas').innerHTML = filas || '<tr><td colspan="11" class="ayuda">La planilla no tiene personas. Agrégalas abajo.</td></tr>';
+        pintarTotalesPlanilla();
+
+        const incluidos = new Set(planilla.lineas.map(l => l.personal_id));
+        const disponibles = personal.filter(p => p.activo && !incluidos.has(p.id));
+        $('plAgregarPersona').innerHTML = disponibles.length
+            ? disponibles.map(p => `<option value="${p.id}">${escapar(p.nombre)} · ${GRUPO_PERSONA[p.grupo]}</option>`).join('')
+            : '<option value="">Todo el personal activo ya está incluido</option>';
+        $('btnAgregarLinea').disabled = !disponibles.length;
+    }
+
+    function pintarTotalesPlanilla() {
+        const l = planilla.lineas;
+        $('planillaTotales').innerHTML = `
+            <div><span>Total devengado</span><strong>${dinero(l.reduce((s, x) => s + devengado(x), 0))}</strong></div>
+            <div><span>ISR retenido</span><strong class="egreso">−${dinero(sumaCampo(l, 'isr'))}</strong></div>
+            <div><span>Otros descuentos</span><strong class="egreso">−${dinero(sumaCampo(l, 'descuentos'))}</strong></div>
+            <div><span>Neto a pagar (${l.length} personas)</span><strong>${dinero(sumaCampo(l, 'neto'))}</strong></div>`;
+        ORDEN_GRUPOS.forEach(grupo => {
+            const celda = $('sub-' + grupo);
+            if (celda) celda.textContent = dinero(sumaCampo(l.filter(x => x.grupo === grupo), 'neto'));
+        });
+    }
+
+    $('btnCrearPlanilla').addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        const { error } = await db.rpc('crear_planilla', { p_periodo: periodoElegido() });
+        e.target.disabled = false;
+        if (error) {
+            avisar($('planillaMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        abrirPlanilla();
+    });
+
+    // Cada casilla se guarda al salir de ella.
+    $('planillaLineas').addEventListener('change', async (e) => {
+        const campo = e.target.dataset.campo;
+        if (!campo) return;
+        const fila = e.target.closest('tr');
+        const linea = planilla.lineas.find(l => l.id === Number(fila.dataset.linea));
+        const aviso = $('planillaMensaje');
+        const esTexto = campo === 'nota' || campo === 'forma_pago';
+        const restaurar = () => { e.target.value = esTexto ? (linea[campo] || '') : Number(linea[campo]); };
+
+        let valor;
+        if (esTexto) valor = e.target.value.trim() || null;
+        else {
+            valor = Number(e.target.value || 0);
+            if (!(valor >= 0)) {
+                restaurar();
+                avisar(aviso, 'Los montos no pueden ser negativos.', 'error');
+                return;
+            }
+        }
+
+        const { data, error } = await db
+            .from('planilla_lineas')
+            .update({ [campo]: valor })
+            .eq('id', linea.id)
+            .select()
+            .single();
+        if (error) {
+            restaurar();
+            const texto = error.message.includes('neto_no_negativo')
+                ? 'Las multas, el ISR y los descuentos no pueden ser mayores que lo devengado.'
+                : error.message;
+            avisar(aviso, 'Error: ' + texto, 'error');
+            return;
+        }
+        Object.assign(linea, data);
+        fila.querySelector('[data-neto]').textContent = dinero(linea.neto);
+        pintarTotalesPlanilla();
+        avisar(aviso, `Guardado: ${linea.nombre}.`, 'ok');
+    });
+
+    $('planillaLineas').addEventListener('click', async (e) => {
+        const fila = e.target.closest('tr[data-linea]');
+        if (!fila) return;
+        const linea = planilla.lineas.find(l => l.id === Number(fila.dataset.linea));
+
+        if ('recibo' in e.target.dataset) {
+            imprimir(documentoRecibo(linea));
+            return;
+        }
+        if (!('quitar' in e.target.dataset)) return;
+        if (!confirm(`¿Quitar a ${linea.nombre} de esta planilla?`)) return;
+
+        const { error } = await db.from('planilla_lineas').delete().eq('id', linea.id);
+        if (error) {
+            avisar($('planillaMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        abrirPlanilla();
+    });
+
+    $('btnAgregarLinea').addEventListener('click', async () => {
+        const p = personal.find(x => x.id === Number($('plAgregarPersona').value));
+        if (!p) return;
+        const { error } = await db.from('planilla_lineas').insert([{
+            planilla_id: planilla.id, personal_id: p.id, nombre: p.nombre, grupo: p.grupo, cargo: p.cargo,
+            documento: p.documento, salario: p.salario, otros: p.otros, isr: p.isr, forma_pago: p.forma_pago
+        }]);
+        if (error) {
+            avisar($('planillaMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        abrirPlanilla();
+    });
+
+    $('btnPagarPlanilla').addEventListener('click', async (e) => {
+        const fechaPago = $('plFechaPago').value;
+        if (!fechaPago) {
+            avisar($('planillaMensaje'), 'Indica la fecha de pago.', 'error');
+            return;
+        }
+        const total = sumaCampo(planilla.lineas, 'neto');
+        if (!confirm(`¿Marcar la planilla de ${nombrePeriodo(planilla.periodo)} como pagada el ${fechaCorta(fechaPago)}?\n\n`
+            + `Se registrarán egresos por ${dinero(total)} en Movimientos y la planilla ya no se podrá modificar `
+            + '(salvo revirtiendo el pago).')) return;
+
+        e.target.disabled = true;
+        const { error } = await db.rpc('pagar_planilla', { p_id: planilla.id, p_fecha: fechaPago });
+        e.target.disabled = false;
+        if (error) {
+            avisar($('planillaMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        await abrirPlanilla();
+        avisar($('planillaMensaje'), 'Planilla pagada. Los egresos ya aparecen en Movimientos, el Dashboard y los Reportes.', 'ok');
+    });
+
+    $('btnRevertirPlanilla').addEventListener('click', async (e) => {
+        const motivo = prompt('¿Por qué se revierte el pago? Sus egresos quedarán anulados en Movimientos y la planilla volverá a borrador.');
+        if (motivo === null) return;
+        e.target.disabled = true;
+        const { error } = await db.rpc('revertir_planilla', { p_id: planilla.id, p_motivo: motivo });
+        e.target.disabled = false;
+        if (error) {
+            avisar($('planillaMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        abrirPlanilla();
+    });
+
+    $('btnEliminarPlanilla').addEventListener('click', async () => {
+        if (!confirm(`¿Eliminar el borrador de la planilla de ${nombrePeriodo(planilla.periodo)}? Se pierden los cambios cargados.`)) return;
+        const { error } = await db.from('planillas').delete().eq('id', planilla.id);
+        if (error) {
+            avisar($('planillaMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        abrirPlanilla();
+    });
+
+    // Fecha que va en planilla y recibos: la del pago, o la elegida si todavía es borrador.
+    const fechaDocumento = () => planilla.fecha_pago || $('plFechaPago').value || hoy();
+
+    function documentoPlanilla() {
+        const celdas = (l) => CAMPOS_LINEA.map(c => `<td class="num">${dinero(l[c])}</td>`).join('');
+        const totales = (lineas) => CAMPOS_LINEA.map(c => `<td class="num">${dinero(sumaCampo(lineas, c))}</td>`).join('');
+        let filas = '';
+        ORDEN_GRUPOS.forEach(grupo => {
+            const lineas = planilla.lineas.filter(l => l.grupo === grupo);
+            if (!lineas.length) return;
+            filas += `<tr class="grupo"><td colspan="9">${GRUPOS[grupo]}</td></tr>`;
+            filas += lineas.map(l => `
+                <tr><td>${escapar(l.nombre)}</td><td>${escapar(l.cargo)}</td>${celdas(l)}
+                    <td class="num"><strong>${dinero(l.neto)}</strong></td></tr>`).join('');
+            filas += `<tr class="total"><td colspan="2">Subtotal ${GRUPOS[grupo].toLowerCase()} (${lineas.length})</td>
+                ${totales(lineas)}<td class="num">${dinero(sumaCampo(lineas, 'neto'))}</td></tr>`;
+        });
+        const l = planilla.lineas;
+        const estado = planilla.estado === 'pagada' ? `Pagada el ${fechaCorta(planilla.fecha_pago)}` : 'BORRADOR — pendiente de pago';
+        return `
+            <div class="documento planilla-doc">
+                ${membrete('Planilla de sueldos y bonos', `${mayuscula(nombrePeriodo(planilla.periodo))} · ${estado}`)}
+                <table class="tabla">
+                    <thead><tr><th>Nombre</th><th>Cargo</th><th class="num">Sueldo</th><th class="num">Bono</th>
+                        <th class="num">Otros / viáticos</th><th class="num">Multas</th><th class="num">ISR</th>
+                        <th class="num">Descuentos</th><th class="num">Neto</th></tr></thead>
+                    <tbody>${filas}
+                        <tr class="total neto-final"><td colspan="2">Total general (${l.length} personas)</td>
+                            ${totales(l)}<td class="num">${dinero(sumaCampo(l, 'neto'))}</td></tr>
+                    </tbody>
+                </table>
+                <div class="firmas"><div>Elaborado por</div>
+                    <div>Autorizado por: ${escapar(ajustes.firmante_nombre || '')}<br>${escapar(ajustes.firmante_cargo || '')}</div></div>
+                <p class="ayuda pie-reporte">Generado por ${escapar(perfil.nombre || perfil.email)} el ${new Date().toLocaleString('es')}</p>
+            </div>`;
+    }
+
+    // Recibo individual con el formato que ya usa el club ("Cancelación de sueldo y bonos").
+    function documentoRecibo(l) {
+        const fila = (concepto, valor, clase) => `<tr class="${clase || ''}"><td>${concepto}</td><td class="num">${valor}</td></tr>`;
+        const casilla = (forma) => `<span class="casilla">${l.forma_pago === forma ? '☒' : '☐'} ${FORMAS_PAGO[forma].toUpperCase()}</span>`;
+        return `
+            <div class="documento recibo">
+                <div class="recibo-banda">
+                    <img src="img/logo.jpg" alt="">
+                    <strong>${CLUB.toUpperCase()}</strong>
+                    <span>RECIBO<br>DE PAGO</span>
+                </div>
+                <h2>CANCELACIÓN DE SUELDO Y BONOS</h2>
+                <p class="recibo-sub">Comprobante individual de pago · N.º ${planilla.periodo.slice(0, 7)}-${String(l.id).padStart(4, '0')}</p>
+
+                <dl class="recibo-datos">
+                    <dt>NOMBRE COMPLETO</dt><dd>${escapar(l.nombre)}</dd>
+                    <dt>CARGO / POSICIÓN</dt><dd>${escapar(l.cargo || GRUPO_PERSONA[l.grupo])}</dd>
+                    <dt>PERÍODO DE PAGO</dt><dd>${mayuscula(nombrePeriodo(planilla.periodo))}</dd>
+                    <dt>FECHA DE PAGO</dt><dd>${fechaCorta(fechaDocumento()).replaceAll('/', ' / ')}</dd>
+                </dl>
+
+                <h3>DETALLE DEL PAGO</h3>
+                <table class="recibo-tabla">
+                    <thead><tr><th>CONCEPTO</th><th class="num">MONTO (US$)</th></tr></thead>
+                    <tbody>
+                        ${fila('Sueldo', dinero(l.salario))}
+                        ${fila('Bono', dinero(l.bonos))}
+                        ${fila('Otros / Bonificación adicional / Viáticos', dinero(l.otros))}
+                        ${Number(l.multas) ? fila('Descuento por multa', '−' + dinero(l.multas)) : ''}
+                        ${fila('TOTAL DEVENGADO', dinero(devengado(l)), 'resaltado')}
+                        ${fila('Descuento ISR', dinero(l.isr))}
+                        ${Number(l.descuentos) ? fila('Otros descuentos / adelantos', '−' + dinero(l.descuentos)) : ''}
+                        ${fila('TOTAL NETO PAGADO', dinero(l.neto), 'resaltado')}
+                    </tbody>
+                </table>
+                <p class="recibo-letras">TOTAL EN LETRAS: ${montoEnLetras(l.neto)}</p>
+                ${l.nota ? `<p class="recibo-nota">Nota: ${escapar(l.nota)}</p>` : ''}
+
+                <h3>FORMA DE PAGO</h3>
+                <div class="recibo-formas">${Object.keys(FORMAS_PAGO).map(casilla).join('')}</div>
+
+                <h3>CONSTANCIA DE PAGO</h3>
+                <p class="recibo-constancia">Por medio del presente documento se deja constancia de que la persona identificada ha recibido
+                    del ${CLUB} el monto neto indicado, correspondiente al sueldo y/o bonos del período señalado,
+                    después de aplicar el descuento por ISR cuando corresponda.</p>
+
+                <div class="recibo-firmas">
+                    <div><span>FIRMA DE QUIEN RECIBE</span>${l.documento ? `<b>DUI: ${escapar(l.documento)}</b>` : ''}</div>
+                    <div><span>FIRMA / ${escapar((ajustes.firmante_nombre || '').toUpperCase())}</span>
+                        ${ajustes.firmante_dui ? `<b>DUI: ${escapar(ajustes.firmante_dui)}</b>` : ''}</div>
+                </div>
+                <p class="recibo-pie">${CLUB.toUpperCase()} • COMPROBANTE INTERNO DE PAGO</p>
+            </div>`;
+    }
+
+    $('btnImprimirPlanilla').addEventListener('click', () => imprimir(documentoPlanilla()));
+    $('btnRecibos').addEventListener('click', () => imprimir(planilla.lineas.map(documentoRecibo).join('')));
+
+    $('btnExcelPlanilla').addEventListener('click', async () => {
+        try {
+            await cargarLibreriaExcel();
+        } catch (error) {
+            avisar($('planillaMensaje'), error.message, 'error');
+            return;
+        }
+        const l = planilla.lineas;
+        const filas = [
+            [`${CLUB} — Planilla de sueldos y bonos`],
+            [`${mayuscula(nombrePeriodo(planilla.periodo))} · ${planilla.estado === 'pagada' ? 'Pagada el ' + fechaCorta(planilla.fecha_pago) : 'Borrador'}`],
+            [],
+            ['Grupo', 'Nombre', 'Cargo', 'DUI', 'Sueldo', 'Bono', 'Otros / viáticos', 'Multas', 'Total devengado',
+                'ISR', 'Descuentos', 'Neto', 'Forma de pago', 'Nota']
+        ].concat(l.map(x => [
+            GRUPOS[x.grupo], x.nombre, x.cargo || '', x.documento || '', Number(x.salario), Number(x.bonos), Number(x.otros),
+            Number(x.multas), devengado(x), Number(x.isr), Number(x.descuentos), Number(x.neto), FORMAS_PAGO[x.forma_pago], x.nota || ''
+        ]));
+        filas.push(['Total', '', '', '', sumaCampo(l, 'salario'), sumaCampo(l, 'bonos'), sumaCampo(l, 'otros'),
+            sumaCampo(l, 'multas'), l.reduce((s, x) => s + devengado(x), 0), sumaCampo(l, 'isr'),
+            sumaCampo(l, 'descuentos'), sumaCampo(l, 'neto')]);
+
+        const hoja = XLSX.utils.aoa_to_sheet(filas);
+        hoja['!cols'] = [{ wch: 16 }, { wch: 38 }, { wch: 20 }, { wch: 18 }].concat(Array(8).fill({ wch: 13 }), [{ wch: 14 }, { wch: 40 }]);
+        const libro = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(libro, hoja, 'Planilla');
+        XLSX.writeFile(libro, `planilla_${planilla.periodo.slice(0, 7)}.xlsx`);
+    });
+
+    // ---- Personal del club ----
+    async function cargarPersonal() {
+        const { data, error } = await db.from('personal').select('id, nombre, grupo, cargo, documento, salario, otros, isr, forma_pago, activo');
+        if (error) {
+            avisar($('personalMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        personal = data.sort(ordenarPorGrupo);
+        pintarPersonal();
+    }
+
+    function pintarPersonal() {
+        const monto = (clase, valor) => `<td><input type="number" class="${clase}" value="${Number(valor)}" min="0" step="0.01"></td>`;
+        $('personal').innerHTML = personal.length
+            ? personal.map(p => `
+                <tr data-persona="${p.id}" class="${p.activo ? '' : 'anulada'}">
+                    <td><input type="text" class="pe-nombre" value="${escapar(p.nombre)}" maxlength="120"></td>
+                    <td><select class="pe-grupo">${ORDEN_GRUPOS.map(g =>
+                        `<option value="${g}" ${p.grupo === g ? 'selected' : ''}>${GRUPO_PERSONA[g]}</option>`).join('')}</select></td>
+                    <td><input type="text" class="pe-cargo" value="${escapar(p.cargo)}" maxlength="80"></td>
+                    <td><input type="text" class="pe-documento" value="${escapar(p.documento)}" maxlength="40"></td>
+                    ${monto('pe-salario', p.salario)}${monto('pe-otros', p.otros)}${monto('pe-isr', p.isr)}
+                    <td><select class="pe-forma">${opcionesFormaPago(p.forma_pago)}</select></td>
+                    <td><input type="checkbox" class="pe-activo" ${p.activo ? 'checked' : ''}></td>
+                    <td><button type="button" class="btn-chico" data-guardar>Guardar</button></td>
+                </tr>`).join('')
+            : '<tr><td colspan="10" class="ayuda">Todavía no hay personal registrado.</td></tr>';
+    }
+
+    $('personalForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const nuevo = {
+            nombre: $('peNombre').value.trim(),
+            grupo: $('peGrupo').value,
+            cargo: $('peCargo').value.trim() || null,
+            documento: $('peDocumento').value.trim() || null,
+            salario: Number($('peSalario').value || 0),
+            otros: Number($('peOtros').value || 0),
+            isr: Number($('peIsr').value || 0),
+            forma_pago: $('peForma').value
+        };
+        const { error } = await db.from('personal').insert([nuevo]);
+        if (error) {
+            avisar($('personalMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        avisar($('personalMensaje'), `${nuevo.nombre} agregado.`, 'ok');
+        $('personalForm').reset();
+        $('peNombre').focus();
+        await cargarPersonal();
+        pintarPlanilla();
+    });
+
+    $('personal').addEventListener('click', async (e) => {
+        if (!('guardar' in e.target.dataset)) return;
+        const fila = e.target.closest('tr');
+        const valor = (clase) => fila.querySelector('.' + clase).value.trim();
+        const cambios = {
+            nombre: valor('pe-nombre'),
+            grupo: valor('pe-grupo'),
+            cargo: valor('pe-cargo') || null,
+            documento: valor('pe-documento') || null,
+            salario: Number(valor('pe-salario') || 0),
+            otros: Number(valor('pe-otros') || 0),
+            isr: Number(valor('pe-isr') || 0),
+            forma_pago: valor('pe-forma'),
+            activo: fila.querySelector('.pe-activo').checked
+        };
+        e.target.disabled = true;
+        const { error } = await db.from('personal').update(cambios).eq('id', Number(fila.dataset.persona));
+        e.target.disabled = false;
+        if (error) {
+            avisar($('personalMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        avisar($('personalMensaje'), `${cambios.nombre} actualizado.`, 'ok');
+        await cargarPersonal();
+        pintarPlanilla();
+    });
+
+    // ---- Ajustes: datos para documentos (solo dueño) ----
+    async function pintarAjustesDocumentos() {
+        await cargarAjustes();
+        $('ajFirmanteNombre').value = ajustes.firmante_nombre || '';
+        $('ajFirmanteCargo').value = ajustes.firmante_cargo || '';
+        $('ajFirmanteDui').value = ajustes.firmante_dui || '';
+    }
+
+    $('documentosForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const aviso = $('documentosMensaje');
+        const valores = {
+            firmante_nombre: $('ajFirmanteNombre').value.trim(),
+            firmante_cargo: $('ajFirmanteCargo').value.trim(),
+            firmante_dui: $('ajFirmanteDui').value.trim()
+        };
+        for (const [clave, valor] of Object.entries(valores)) {
+            const { error } = await db.from('ajustes').update({ valor }).eq('clave', clave);
+            if (error) {
+                avisar(aviso, 'Error: ' + error.message, 'error');
+                return;
+            }
+        }
+        await cargarAjustes();
+        avisar(aviso, 'Datos guardados. Se usarán en los próximos recibos y planillas.', 'ok');
     });
 
     // ---- Ajustes: usuarios (solo dueño) ----

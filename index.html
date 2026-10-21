@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema Atlético Balboa</title>
+    <link rel="icon" type="image/png" href="img/icono.png">
     <link rel="stylesheet" href="css/style.css">
 
     <!-- 1) Librería de Supabase (versión fija). Expone window.supabase -->
@@ -13,7 +14,10 @@
 </head>
 <body>
     <header class="topbar">
-        <h1>Atlético Balboa <span>Control Financiero</span></h1>
+        <div class="marca">
+            <img src="img/logo.jpg" alt="Escudo del Club Atlético Balboa">
+            <h1>Atlético Balboa <span>Control Financiero</span></h1>
+        </div>
         <div id="sesion" class="sesion" hidden>
             <span id="usuarioEmail"></span>
             <button type="button" id="btnSalir">Salir</button>
@@ -23,6 +27,7 @@
     <!-- Pantalla de acceso: visible solo sin sesión iniciada -->
     <main id="pantallaLogin" class="angosto" hidden>
         <form id="loginForm" class="tarjeta">
+            <img class="login-escudo" src="img/logo.jpg" alt="">
             <h2>Iniciar sesión</h2>
             <label>Correo
                 <input type="email" id="loginEmail" autocomplete="username" required>
@@ -157,8 +162,95 @@
         </section>
 
         <section id="planilla" class="seccion">
-            <h2>Control de Planilla</h2>
-            <p class="pronto">Próximamente: pago de salarios a jugadores y cuerpo técnico.</p>
+            <h2>Planilla del mes</h2>
+            <div class="tarjeta">
+                <form id="planillaMesForm" class="filtros">
+                    <label>Mes <select id="plMes"></select></label>
+                    <label>Año <select id="plAnio"></select></label>
+                    <button type="submit">Abrir</button>
+                </form>
+
+                <div id="planillaVacia" hidden>
+                    <p class="ayuda" id="planillaVaciaTexto"></p>
+                    <div class="barra-acciones">
+                        <button type="button" id="btnCrearPlanilla">Crear planilla</button>
+                    </div>
+                </div>
+
+                <div id="planillaDetalle" hidden>
+                    <p><span class="estado" id="planillaEstado"></span> <span class="ayuda" id="planillaEstadoTexto"></span></p>
+                    <div class="totales cuatro" id="planillaTotales"></div>
+                    <div class="tabla-scroll">
+                        <table class="tabla planilla-tabla">
+                            <thead>
+                                <tr>
+                                    <th>Persona</th><th class="num">Sueldo</th><th class="num">Bono</th>
+                                    <th class="num">Otros / viáticos</th><th class="num">Multas</th><th class="num">ISR</th>
+                                    <th class="num">Descuentos</th><th>Forma de pago</th><th>Nota</th>
+                                    <th class="num">Neto</th><th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="planillaLineas"></tbody>
+                        </table>
+                    </div>
+                    <p class="ayuda" id="planillaAyuda">Los cambios se guardan solos al salir de cada casilla.
+                        Sueldo, bono y otros/viáticos se suman; multas, ISR y descuentos (adelantos, préstamos) se restan.</p>
+
+                    <div class="barra-acciones" id="planillaEdicion">
+                        <label>Agregar persona <select id="plAgregarPersona"></select></label>
+                        <button type="button" class="secundario" id="btnAgregarLinea">Agregar</button>
+                        <label>Fecha de pago <input type="date" id="plFechaPago"></label>
+                        <button type="button" id="btnPagarPlanilla">Marcar como pagada</button>
+                        <button type="button" class="secundario" id="btnEliminarPlanilla">Eliminar borrador</button>
+                    </div>
+                    <div class="barra-acciones">
+                        <button type="button" class="btn-chico" id="btnImprimirPlanilla">Imprimir planilla / PDF</button>
+                        <button type="button" class="btn-chico" id="btnRecibos">Recibos de pago</button>
+                        <button type="button" class="btn-chico" id="btnExcelPlanilla">Descargar Excel</button>
+                        <button type="button" class="btn-chico secundario" id="btnRevertirPlanilla">Revertir pago</button>
+                    </div>
+                </div>
+                <p id="planillaMensaje" class="mensaje" role="status"></p>
+            </div>
+
+            <h2>Personal</h2>
+            <div class="tarjeta">
+                <form id="personalForm" class="filtros">
+                    <label>Nombre <input type="text" id="peNombre" maxlength="120" required></label>
+                    <label>Grupo
+                        <select id="peGrupo">
+                            <option value="jugador">Jugador</option>
+                            <option value="cuerpo_tecnico">Cuerpo técnico</option>
+                            <option value="administrativo">Administrativo</option>
+                        </select>
+                    </label>
+                    <label>Cargo / posición <input type="text" id="peCargo" maxlength="80" placeholder="Ej. Delantero, DT, Presidente"></label>
+                    <label>DUI <input type="text" id="peDocumento" maxlength="40" placeholder="Opcional"></label>
+                    <label>Sueldo mensual <input type="number" id="peSalario" min="0" step="0.01" value="0" required></label>
+                    <label>Otros / viáticos <input type="number" id="peOtros" min="0" step="0.01" value="0"></label>
+                    <label>ISR mensual <input type="number" id="peIsr" min="0" step="0.01" value="0"></label>
+                    <label>Forma de pago
+                        <select id="peForma">
+                            <option value="transferencia">Transferencia</option>
+                            <option value="efectivo">Efectivo</option>
+                            <option value="cheque">Cheque</option>
+                            <option value="otro">Otro</option>
+                        </select>
+                    </label>
+                    <button type="submit">Agregar</button>
+                </form>
+                <p class="ayuda">Sueldo, otros/viáticos e ISR se copian al crear cada planilla nueva; ahí se pueden ajustar ese mes.
+                    Cambiarlos aquí no modifica planillas ya creadas.
+                    Desactiva a quien ya no esté en el club: no se borra, pero no entra en planillas nuevas.</p>
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead><tr><th>Nombre</th><th>Grupo</th><th>Cargo</th><th>DUI</th><th class="num">Sueldo</th>
+                            <th class="num">Otros / viáticos</th><th class="num">ISR</th><th>Forma de pago</th><th>Activo</th><th></th></tr></thead>
+                        <tbody id="personal"></tbody>
+                    </table>
+                </div>
+                <p id="personalMensaje" class="mensaje" role="status"></p>
+            </div>
         </section>
 
         <section id="reportes" class="seccion">
@@ -179,9 +271,13 @@
 
             <div id="reporte" class="tarjeta reporte" hidden>
                 <div class="reporte-cabecera">
-                    <div>
-                        <h2>Atlético Balboa — Corte de caja</h2>
-                        <p class="ayuda" id="reportePeriodo"></p>
+                    <div class="membrete">
+                        <img src="img/logo.jpg" alt="">
+                        <div>
+                            <strong>Club Deportivo Atlético Balboa</strong>
+                            <span>Corte de caja</span>
+                            <small id="reportePeriodo"></small>
+                        </div>
                     </div>
                     <div class="acciones no-imprimir">
                         <button type="button" class="btn-chico" id="btnExcel">Descargar Excel</button>
@@ -253,6 +349,18 @@
                 <p id="usuariosMensaje" class="mensaje" role="status"></p>
             </div>
 
+            <h2>Datos para recibos y planillas</h2>
+            <div class="tarjeta">
+                <form id="documentosForm" class="filtros">
+                    <label>Firma por el club <input type="text" id="ajFirmanteNombre" maxlength="120"></label>
+                    <label>Cargo <input type="text" id="ajFirmanteCargo" maxlength="80"></label>
+                    <label>DUI <input type="text" id="ajFirmanteDui" maxlength="40"></label>
+                    <button type="submit">Guardar</button>
+                </form>
+                <p class="ayuda">Aparece en la línea de firma de cada recibo de pago y en la autorización de la planilla.</p>
+                <p id="documentosMensaje" class="mensaje" role="status"></p>
+            </div>
+
             <h2>Categorías</h2>
             <div class="tarjeta">
                 <form id="categoriaForm" class="filtros">
@@ -291,5 +399,8 @@
         </section>
     </main>
     </div>
+
+    <!-- Aquí se arma la planilla o los recibos justo antes de imprimir -->
+    <div id="impresion"></div>
 </body>
 </html>
