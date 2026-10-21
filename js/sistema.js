@@ -87,6 +87,7 @@
         document.querySelectorAll('.nav a').forEach(a => {
             a.hidden = !a.dataset.roles.split(' ').includes(perfil.rol);
         });
+        document.querySelectorAll('.solo-gestion').forEach(el => { el.hidden = !puede('dueno', 'gerente'); });
         $('tituloHistorial').textContent = puede('secretaria') ? 'Mis movimientos registrados' : 'Historial';
 
         await cargarCategorias();
@@ -133,6 +134,7 @@
 
         if (id === 'dashboard') cargarDashboard();
         if (id === 'planilla') cargarSeccionPlanilla();
+        if (id === 'inventario') cargarInventario();
         if (id === 'movimientos') cargarHistorial();
         if (id === 'ajustes') { cargarUsuarios(); pintarCategorias(); pintarAjustesDocumentos(); }
         if (id === 'cuenta') $('cuentaDatos').textContent = `${perfil.email} · ${ROLES[perfil.rol]}`;
@@ -1356,6 +1358,364 @@
                 </div>
                 <p class="recibo-pie">${CLUB.toUpperCase()} • COMPROBANTE INTERNO DE PAGO</p>
             </div>`;
+    }
+
+    // ---- Inventario (camisetas y otra mercadería) ----
+    // Todos venden; el dueño y el gerente crean productos y registran entradas y salidas.
+    // La existencia la calcula la base de datos: entradas menos ventas y salidas, sin contar ventas anuladas.
+    let productos = [];
+    const TIPOS_INVENTARIO = { entrada: 'Entrada', venta: 'Venta', salida: 'Salida' };
+    const nombreProducto = (p) => [p.nombre, p.color, p.talla && `talla ${p.talla}`].filter(Boolean).join(' · ');
+
+    async function cargarInventario() {
+        $('vFecha').value = $('vFecha').value || hoy();
+        $('esFecha').value = $('esFecha').value || hoy();
+        $('tituloInvMovimientos').textContent = puede('secretaria') ? 'Mis ventas registradas' : 'Movimientos de inventario';
+        const { data, error } = await db.rpc('existencias');
+        if (error) {
+            avisar($('existenciasMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        productos = data;
+        pintarVenta();
+        pintarExistencias();
+        cargarMovimientosInventario();
+    }
+
+    function pintarVenta() {
+        const disponibles = productos.filter(p => p.activo && p.existencia > 0);
+        $('ventaProductos').innerHTML = disponibles.length
+            ? disponibles.map(p => `
+                <label class="venta-item" data-producto="${p.id}" data-precio="${p.precio}">
+                    <span>${escapar(nombreProducto(p))} <small class="detalle">${dinero(p.precio)} · quedan ${p.existencia}</small></span>
+                    <input type="number" class="v-cantidad" min="0" max="${p.existencia}" step="1" placeholder="0" aria-label="Cantidad">
+                </label>`).join('')
+            : '<p class="ayuda">No hay productos con existencia. El dueño o el gerente deben registrar una entrada primero.</p>';
+        $('btnVenta').disabled = !disponibles.length;
+        $('ventaTotal').textContent = '';
+    }
+
+    function itemsVenta() {
+        return Array.from(document.querySelectorAll('#ventaProductos .venta-item'))
+            .map(f => ({
+                producto_id: Number(f.dataset.producto),
+                precio: Number(f.dataset.precio),
+                cantidad: Number(f.querySelector('.v-cantidad').value || 0)
+            }))
+            .filter(i => i.cantidad > 0);
+    }
+
+    $('ventaProductos').addEventListener('input', () => {
+        const total = itemsVenta().reduce((s, i) => s + i.cantidad * i.precio, 0);
+        $('ventaTotal').textContent = total ? `Total: ${dinero(total)}` : '';
+    });
+
+    $('ventaForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const aviso = $('ventaMensaje');
+        const items = itemsVenta();
+        if (!items.length || items.some(i => !Number.isInteger(i.cantidad))) {
+            avisar(aviso, 'Escribe cuántas unidades se vendieron (números enteros).', 'error');
+            return;
+        }
+        const ventana = window.open('', '_blank'); // se abre ya, si no el navegador la bloquea
+        $('btnVenta').disabled = true;
+        avisar(aviso, 'Registrando...');
+        const fecha = $('vFecha').value;
+        const { data: ids, error } = await db.rpc('registrar_venta', {
+            p_fecha: fecha,
+            p_items: items.map(({ producto_id, cantidad }) => ({ producto_id, cantidad }))
+        });
+        if (error) {
+            $('btnVenta').disabled = false;
+            if (ventana) ventana.close();
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        }
+        const total = items.reduce((s, i) => s + i.cantidad * i.precio, 0);
+        const lineas = items.map(i => ({ ...i, producto: productos.find(p => p.id === i.producto_id) }));
+
+        // El ticket queda adjunto al ingreso (o a cada ingreso, si la venta tocó varias categorías).
+        let resultado = `Venta de ${dinero(total)} registrada.`;
+        let problema = false;
+        try {
+            avisar(aviso, 'Generando el ticket...');
+            const pdf = await ticketVenta(ids, fecha, lineas, total);
+            const archivo = new File([pdf], `ticket-venta-${ids[0]}.pdf`, { type: 'application/pdf' });
+            const fallidos = (await Promise.all(ids.map(id => subirComprobantes(id, [archivo])))).flat();
+            if (fallidos.length) {
+                problema = true;
+                resultado += ' El ticket no se pudo adjuntar al ingreso; descárgalo y agrégalo desde Movimientos.';
+            }
+            const enlace = URL.createObjectURL(pdf);
+            if (ventana) ventana.location = enlace;
+            else location.href = enlace;
+        } catch (err) {
+            if (ventana) ventana.close();
+            console.error('Error al generar el ticket:', err);
+            problema = true;
+            resultado += ' No se pudo generar el ticket: ' + err.message;
+        }
+        $('btnVenta').disabled = false;
+        avisar(aviso, resultado, problema ? 'error' : 'ok');
+        await cargarInventario();
+    });
+
+    // La librería de PDF solo se descarga la primera vez que se hace un ticket.
+    function cargarLibreriaPdf() {
+        if (window.jspdf) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('No se pudo descargar la librería de PDF. Revisa tu conexión.'));
+            document.head.appendChild(s);
+        });
+    }
+
+    function cargarImagen(src) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error('No se pudo cargar el escudo'));
+            img.src = src;
+        });
+    }
+
+    // Ticket en hoja carta (papel bond): arriba el original para el cliente y abajo la copia del club,
+    // con una línea para cortar por la mitad. Si la venta tiene muchos productos, cada copia va en su hoja.
+    async function ticketVenta(ids, fecha, lineas, total) {
+        await cargarLibreriaPdf();
+        const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'letter' });
+        const ANCHO = 215.9, MITAD = 139.7, X = 15, DERECHA = ANCHO - 15;
+        let escudo = null;
+        try {
+            escudo = await cargarImagen('img/logo.jpg');
+        } catch (_) {
+            // sin escudo el ticket sigue siendo válido
+        }
+        const hora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+        const raya = (y) => { doc.setLineDashPattern([], 0); doc.setDrawColor(150); doc.line(X, y, DERECHA, y); };
+
+        function copia(y0, leyenda) {
+            let y = y0 + 12;
+            if (escudo) doc.addImage(escudo, 'JPEG', X, y, 20, 20);
+            const xTexto = escudo ? X + 24 : X;
+            doc.setTextColor(0);
+            doc.setFont('helvetica', 'bold').setFontSize(13);
+            doc.text(CLUB, xTexto, y + 7);
+            doc.setFont('helvetica', 'normal').setFontSize(9);
+            doc.text('La Unión, El Salvador', xTexto, y + 12);
+            doc.setFont('helvetica', 'bold').setFontSize(11);
+            doc.text('TICKET DE VENTA', DERECHA, y + 5, { align: 'right' });
+            doc.text(`N.º ${ids.join(', ')}`, DERECHA, y + 10.5, { align: 'right' });
+            doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(110);
+            doc.text(leyenda, DERECHA, y + 15.5, { align: 'right' });
+            doc.setTextColor(0).setFontSize(9);
+            y += 26;
+            doc.text(`Fecha: ${fechaCorta(fecha)}   ${hora}`, X, y);
+            doc.text(`Atendió: ${perfil.nombre || perfil.email}`, DERECHA, y, { align: 'right' });
+
+            raya(y += 4);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Cant.', X + 2, y += 5);
+            doc.text('Producto', X + 20, y);
+            doc.text('Precio', DERECHA - 35, y, { align: 'right' });
+            doc.text('Importe', DERECHA - 2, y, { align: 'right' });
+            raya(y += 2.5);
+            doc.setFont('helvetica', 'normal');
+            for (const l of lineas) {
+                doc.text(String(l.cantidad), X + 2, y += 5.5);
+                doc.text(doc.splitTextToSize(nombreProducto(l.producto), 105)[0], X + 20, y);
+                doc.text(dinero(l.precio), DERECHA - 35, y, { align: 'right' });
+                doc.text(dinero(l.cantidad * l.precio), DERECHA - 2, y, { align: 'right' });
+            }
+            raya(y += 3);
+
+            doc.setFont('helvetica', 'bold').setFontSize(12);
+            doc.text('TOTAL', DERECHA - 35, y += 7, { align: 'right' });
+            doc.text(dinero(total), DERECHA - 2, y, { align: 'right' });
+            doc.setFont('helvetica', 'normal').setFontSize(8);
+            doc.text(montoEnLetras(total), X, y);
+
+            const pie = Math.max(y + 12, y0 + MITAD - 14);
+            doc.setFontSize(9);
+            doc.text('¡Gracias por apoyar al club!', ANCHO / 2, pie, { align: 'center' });
+            doc.setFontSize(7).setTextColor(110);
+            doc.text('Comprobante interno de venta, no es factura.', ANCHO / 2, pie + 4, { align: 'center' });
+            doc.setTextColor(0);
+        }
+
+        // Encabezado (~50 mm) + filas + total y pie (~35 mm) deben caber en media hoja.
+        const cabenEnMedia = 50 + lineas.length * 5.5 + 35 <= MITAD;
+        copia(0, 'ORIGINAL · CLIENTE');
+        if (cabenEnMedia) {
+            doc.setLineDashPattern([2, 2], 0).setDrawColor(150);
+            doc.line(5, MITAD, ANCHO - 5, MITAD);
+            doc.setFontSize(7).setTextColor(130);
+            doc.text('cortar aquí', ANCHO / 2, MITAD - 1.5, { align: 'center' });
+            copia(MITAD, 'COPIA · CLUB');
+        } else {
+            doc.addPage('letter');
+            copia(0, 'COPIA · CLUB');
+        }
+        return doc.output('blob');
+    }
+
+    function pintarExistencias() {
+        const gestion = puede('dueno', 'gerente');
+        const activos = productos.filter(p => p.activo);
+        const unidades = activos.reduce((s, p) => s + p.existencia, 0);
+        $('inventarioTotales').innerHTML = `
+            <div><span>Unidades en existencia</span><strong>${unidades}</strong></div>
+            <div><span>Valor a precio de venta</span><strong>${dinero(activos.reduce((s, p) => s + p.existencia * p.precio, 0))}</strong></div>
+            <div><span>Productos activos</span><strong>${activos.length}</strong></div>`;
+
+        const categoriasIngreso = categorias.filter(c => c.tipo === 'ingreso' && c.activa);
+        const opcionesCategoria = (actual) => categoriasIngreso
+            .map(c => `<option value="${c.id}" ${c.id === actual ? 'selected' : ''}>${escapar(c.nombre)}</option>`).join('');
+        $('prCategoria').innerHTML = opcionesCategoria((categorias.find(c => c.clave === 'venta_camisetas') || {}).id);
+        $('esProducto').innerHTML = productos.filter(p => p.activo)
+            .map(p => `<option value="${p.id}">${escapar(nombreProducto(p))} (quedan ${p.existencia})</option>`).join('');
+
+        $('existencias').innerHTML = productos.length
+            ? productos.map(p => gestion ? `
+                <tr data-producto="${p.id}" class="${p.activo ? '' : 'anulada'}">
+                    <td><input type="text" class="pr-nombre" value="${escapar(p.nombre)}" maxlength="80"></td>
+                    <td><input type="text" class="pr-color" value="${escapar(p.color)}" maxlength="40"></td>
+                    <td><input type="text" class="pr-talla" value="${escapar(p.talla)}" maxlength="20"></td>
+                    <td><input type="number" class="pr-precio" value="${Number(p.precio)}" min="0.01" step="0.01"></td>
+                    <td class="num"><strong>${p.existencia}</strong></td>
+                    <td><select class="pr-categoria">${opcionesCategoria(p.categoria_id)}</select></td>
+                    <td><input type="checkbox" class="pr-activo" ${p.activo ? 'checked' : ''}></td>
+                    <td><button type="button" class="btn-chico" data-guardar>Guardar</button></td>
+                </tr>` : `
+                <tr class="${p.activo ? '' : 'anulada'}">
+                    <td>${escapar(p.nombre)}</td><td>${escapar(p.color)}</td><td>${escapar(p.talla)}</td>
+                    <td class="num">${dinero(p.precio)}</td><td class="num"><strong>${p.existencia}</strong></td>
+                </tr>`).join('')
+            : `<tr><td colspan="8" class="ayuda">Todavía no hay productos.${gestion ? ' Agrégalos con el formulario de arriba.' : ''}</td></tr>`;
+    }
+
+    $('productoForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const nuevo = {
+            nombre: $('prNombre').value.trim(),
+            color: $('prColor').value.trim() || null,
+            talla: $('prTalla').value.trim() || null,
+            precio: Number($('prPrecio').value),
+            categoria_id: Number($('prCategoria').value)
+        };
+        const existencia = Number($('prExistencia').value || 0);
+        if (!Number.isInteger(existencia) || existencia < 0) {
+            avisar($('existenciasMensaje'), 'La existencia inicial debe ser un número entero (0 o más).', 'error');
+            return;
+        }
+        // La existencia inicial queda como una entrada en el historial, igual que un pedido.
+        const { error } = await db.rpc('crear_producto', {
+            p_nombre: nuevo.nombre,
+            p_color: nuevo.color,
+            p_talla: nuevo.talla,
+            p_precio: nuevo.precio,
+            p_categoria: nuevo.categoria_id,
+            p_existencia: existencia,
+            p_fecha: hoy()
+        });
+        if (error) {
+            avisar($('existenciasMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        avisar($('existenciasMensaje'), existencia
+            ? `${nombreProducto(nuevo)} agregado con ${existencia} en existencia.`
+            : `${nombreProducto(nuevo)} agregado. Registra su existencia con una entrada.`, 'ok');
+        $('productoForm').reset();
+        $('prNombre').focus();
+        await cargarInventario();
+    });
+
+    $('existencias').addEventListener('click', async (e) => {
+        if (!('guardar' in e.target.dataset)) return;
+        const fila = e.target.closest('tr');
+        const valor = (clase) => fila.querySelector('.' + clase).value.trim();
+        const cambios = {
+            nombre: valor('pr-nombre'),
+            color: valor('pr-color') || null,
+            talla: valor('pr-talla') || null,
+            precio: Number(valor('pr-precio')),
+            categoria_id: Number(valor('pr-categoria')),
+            activo: fila.querySelector('.pr-activo').checked
+        };
+        e.target.disabled = true;
+        const { error } = await db.from('productos').update(cambios).eq('id', Number(fila.dataset.producto));
+        e.target.disabled = false;
+        if (error) {
+            avisar($('existenciasMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        avisar($('existenciasMensaje'), `${nombreProducto(cambios)} actualizado.`, 'ok');
+        await cargarInventario();
+    });
+
+    $('entradaSalidaForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const aviso = $('entradaSalidaMensaje');
+        const cantidad = Number($('esCantidad').value);
+        if (!Number.isInteger(cantidad) || cantidad <= 0) {
+            avisar(aviso, 'La cantidad debe ser un número entero mayor a 0.', 'error');
+            return;
+        }
+        if ($('esTipo').value === 'salida' && $('esNota').value.trim().length < 3) {
+            avisar(aviso, 'Escribe el motivo de la salida en la nota.', 'error');
+            return;
+        }
+        $('btnEntradaSalida').disabled = true;
+        const { error } = await db.rpc('movimiento_inventario', {
+            p_producto: Number($('esProducto').value),
+            p_tipo: $('esTipo').value,
+            p_cantidad: cantidad,
+            p_fecha: $('esFecha').value,
+            p_nota: $('esNota').value
+        });
+        $('btnEntradaSalida').disabled = false;
+        if (error) {
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        }
+        avisar(aviso, `${TIPOS_INVENTARIO[$('esTipo').value]} de ${cantidad} registrada.`, 'ok');
+        $('esCantidad').value = '';
+        $('esNota').value = '';
+        await cargarInventario();
+    });
+
+    async function cargarMovimientosInventario() {
+        const { data, error } = await db
+            .from('inventario_movimientos')
+            .select('id, producto_id, fecha, tipo, cantidad, precio, nota, registrado_email, transaccion:transacciones(anulada)')
+            .order('fecha', { ascending: false })
+            .order('id', { ascending: false })
+            .limit(100);
+        if (error) {
+            $('invMovimientos').innerHTML = `<tr><td colspan="6" class="ayuda">Error: ${escapar(error.message)}</td></tr>`;
+            return;
+        }
+        $('invMovimientos').innerHTML = data.length
+            ? data.map(m => {
+                const p = productos.find(x => x.id === m.producto_id) || { nombre: '—' };
+                const anulada = m.transaccion && m.transaccion.anulada;
+                const detalle = m.tipo === 'venta'
+                    ? `${dinero(m.cantidad * m.precio)}${anulada ? ' · ingreso anulado, no cuenta' : ''}`
+                    : escapar(m.nota || '');
+                return `
+                    <tr class="${anulada ? 'anulada' : ''}">
+                        <td>${fechaCorta(m.fecha)}</td>
+                        <td>${escapar(nombreProducto(p))}</td>
+                        <td>${TIPOS_INVENTARIO[m.tipo]}</td>
+                        <td class="num">${m.tipo === 'entrada' ? '+' : '−'}${m.cantidad}</td>
+                        <td>${detalle}</td>
+                        <td>${escapar(m.registrado_email || '')}</td>
+                    </tr>`;
+            }).join('')
+            : '<tr><td colspan="6" class="ayuda">Todavía no hay movimientos.</td></tr>';
     }
 
     // ---- Personal del club ----

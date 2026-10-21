@@ -46,6 +46,7 @@
     <nav class="nav">
         <a href="#dashboard" data-seccion="dashboard" data-roles="dueno gerente">Dashboard</a>
         <a href="#movimientos" data-seccion="movimientos" data-roles="dueno gerente secretaria">Movimientos</a>
+        <a href="#inventario" data-seccion="inventario" data-roles="dueno gerente secretaria">Inventario</a>
         <a href="#planilla" data-seccion="planilla" data-roles="dueno gerente">Planilla</a>
         <a href="#reportes" data-seccion="reportes" data-roles="dueno gerente">Reportes</a>
         <a href="#ajustes" data-seccion="ajustes" data-roles="dueno">Ajustes</a>
@@ -193,6 +194,73 @@
                 <p id="historialMensaje" class="mensaje" role="status"></p>
                 <!-- Se usa al pulsar "Adjuntar" en una fila del historial -->
                 <input type="file" id="archivoAdjuntar" accept="image/jpeg,image/png,image/webp,application/pdf" multiple hidden>
+            </div>
+        </section>
+
+        <section id="inventario" class="seccion">
+            <h2>Registrar venta</h2>
+            <form id="ventaForm" class="tarjeta angosto">
+                <label>Fecha <input type="date" id="vFecha" required></label>
+                <div id="ventaProductos" class="venta-productos"></div>
+                <p class="ayuda">Escribe cuántas unidades se vendieron de cada producto. <strong id="ventaTotal"></strong></p>
+                <button type="submit" id="btnVenta">Registrar venta y generar ticket</button>
+                <p id="ventaMensaje" class="mensaje" role="status"></p>
+                <p class="ayuda">La venta descuenta la existencia, registra el ingreso en Movimientos y abre el ticket en PDF para imprimirlo o enviarlo; el ticket queda adjunto al ingreso.
+                    Si hubo un error, el dueño o el gerente anula ese ingreso en Movimientos y la existencia se devuelve sola.</p>
+            </form>
+
+            <h2>Existencias</h2>
+            <div class="tarjeta">
+                <div class="totales" id="inventarioTotales"></div>
+                <form id="productoForm" class="filtros solo-gestion">
+                    <label>Producto <input type="text" id="prNombre" maxlength="80" placeholder="Ej. Camiseta oficial" required></label>
+                    <label>Color <input type="text" id="prColor" maxlength="40" placeholder="Ej. Roja"></label>
+                    <label>Talla <input type="text" id="prTalla" maxlength="20" placeholder="Opcional"></label>
+                    <label>Precio de venta <input type="number" id="prPrecio" min="0.01" step="0.01" required></label>
+                    <label>Categoría del ingreso <select id="prCategoria"></select></label>
+                    <label>Existencia inicial <input type="number" id="prExistencia" min="0" step="1" placeholder="0"></label>
+                    <button type="submit">Agregar producto</button>
+                </form>
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead><tr><th>Producto</th><th>Color</th><th>Talla</th><th class="num">Precio</th>
+                            <th class="num">Existencia</th><th class="solo-gestion">Categoría del ingreso</th>
+                            <th class="solo-gestion">Activo</th><th class="solo-gestion"></th></tr></thead>
+                        <tbody id="existencias"></tbody>
+                    </table>
+                </div>
+                <p id="existenciasMensaje" class="mensaje" role="status"></p>
+            </div>
+
+            <div class="solo-gestion">
+                <h2>Entrada o salida de mercadería</h2>
+                <form id="entradaSalidaForm" class="tarjeta filtros">
+                    <label>Producto <select id="esProducto" required></select></label>
+                    <label>Movimiento
+                        <select id="esTipo">
+                            <option value="entrada">Entrada (compra o existencia inicial)</option>
+                            <option value="salida">Salida (regalo, pérdida, uso del club)</option>
+                        </select>
+                    </label>
+                    <label>Cantidad <input type="number" id="esCantidad" min="1" step="1" required></label>
+                    <label>Fecha <input type="date" id="esFecha" required></label>
+                    <label>Nota <input type="text" id="esNota" maxlength="200" placeholder="Ej. Pedido a Textiles La Unión"></label>
+                    <button type="submit" id="btnEntradaSalida">Registrar</button>
+                </form>
+                <p class="ayuda">La entrada solo suma unidades; lo que se pagó por la mercadería se registra aparte en Movimientos como egreso
+                    ("Compra de mercadería para reventa") con su factura. La salida pide el motivo.</p>
+                <p id="entradaSalidaMensaje" class="mensaje" role="status"></p>
+            </div>
+
+            <h2 id="tituloInvMovimientos">Movimientos de inventario</h2>
+            <div class="tarjeta">
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead><tr><th>Fecha</th><th>Producto</th><th>Movimiento</th><th class="num">Cantidad</th><th>Detalle</th><th>Registró</th></tr></thead>
+                        <tbody id="invMovimientos"></tbody>
+                    </table>
+                </div>
+                <p class="ayuda">Se muestran los últimos 100.</p>
             </div>
         </section>
 

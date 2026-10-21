@@ -177,8 +177,14 @@ summary { cursor: pointer; color: var(--rojo-oscuro); }
 .planilla-doc .tabla th, .planilla-doc .tabla td { padding: 5px 4px; }
 
 /* Pago de árbitros */
-[hidden] { display: none !important; }
 fieldset.grupo-campos { border: 0; padding: 0; margin: 0; min-width: 0; }
+
+/* Inventario: una fila por producto con la cantidad vendida */
+.venta-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px 0;
+    border-bottom: 1px solid var(--borde); font-weight: normal; }
+.venta-item small.detalle { display: block; }
+.venta-item input { flex: 0 0 90px; width: 90px; margin: 0; }
+.venta-productos { margin-bottom: 10px; }
 details.plegable { margin-top: 16px; }
 details.plegable summary { font-weight: 600; font-size: 1rem; color: var(--negro); }
 details.plegable[open] summary { margin-bottom: 12px; }
