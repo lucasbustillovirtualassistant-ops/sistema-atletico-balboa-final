@@ -141,7 +141,7 @@
 
     // ---- Categorías ----
     async function cargarCategorias() {
-        const { data, error } = await db.from('categorias').select('id, nombre, tipo, activa').order('id');
+        const { data, error } = await db.from('categorias').select('id, nombre, tipo, activa, clave').order('id');
         if (error) {
             console.error('Error al cargar categorías:', error);
             return;
@@ -166,24 +166,60 @@
             .filter(c => c.activa && c.tipo === tipo.value)
             .map(c => `<option value="${c.id}">${escapar(c.nombre)}</option>`)
             .join('');
+        alternarCamposArbitraje();
+    }
+
+    // Con la categoría Arbitraje se puede, de forma opcional, detallar los árbitros e imprimir sus recibos.
+    // En ese caso el monto es la suma de lo pagado a cada árbitro.
+    const esArbitraje = () => (categorias.find(c => c.id === Number($('categoria').value)) || {}).clave === 'arbitraje';
+    const detallaArbitros = () => esArbitraje() && $('detallarArbitros').checked;
+
+    function alternarCamposArbitraje() {
+        const detalle = detallaArbitros();
+        $('opcionArbitraje').hidden = !esArbitraje();
+        $('camposArbitraje').hidden = $('camposArbitraje').disabled = !detalle;
+        $('monto').readOnly = detalle;
+        if (detalle) $('monto').value = arbitrosDelFormulario().reduce((s, a) => s + a.monto, 0).toFixed(2);
+        $('btnGuardar').textContent = detalle ? 'Registrar pago e imprimir recibos' : 'Registrar Movimiento';
+    }
+
+    function limpiarFormulario() {
+        form.reset();
+        llenarCategoriasFormulario();
+        fecha.value = hoy();
     }
 
     tipo.addEventListener('change', llenarCategoriasFormulario);
+    $('categoria').addEventListener('change', alternarCamposArbitraje);
+    $('detallarArbitros').addEventListener('change', alternarCamposArbitraje);
     fecha.value = hoy();
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+
+        if (detallaArbitros()) {
+            await registrarArbitraje();
+            return;
+        }
 
         const registro = {
             fecha: fecha.value,
             concepto: $('concepto').value.trim(),
             monto: Number($('monto').value),
             tipo: tipo.value,
-            categoria_id: Number($('categoria').value)
+            categoria_id: Number($('categoria').value),
+            proveedor: $('proveedor').value.trim() || null,
+            num_documento: $('numDocumento').value.trim() || null
         };
+        const archivos = Array.from($('archivos').files);
 
         if (!registro.concepto || !(registro.monto > 0) || !registro.categoria_id) {
             avisar(mensaje, 'Revisa el concepto, la categoría y que el monto sea mayor a 0.', 'error');
+            return;
+        }
+        const problema = revisarArchivos(archivos);
+        if (problema) {
+            avisar(mensaje, problema, 'error');
             return;
         }
 
@@ -191,33 +227,105 @@
         avisar(mensaje, 'Guardando...');
 
         // Quién lo registró lo pone la base de datos (trigger), no el navegador.
-        const { error } = await db.from('transacciones').insert([registro]);
-
-        $('btnGuardar').disabled = false;
+        const { data, error } = await db.from('transacciones').insert([registro]).select('id').single();
 
         if (error) {
+            $('btnGuardar').disabled = false;
             console.error('Error de Supabase:', error);
             avisar(mensaje, 'Error: ' + error.message, 'error');
             return;
         }
 
-        avisar(mensaje, '¡Movimiento guardado!', 'ok');
-        form.reset();
-        llenarCategoriasFormulario();
-        fecha.value = hoy();
+        let texto = '¡Movimiento guardado!';
+        if (archivos.length) {
+            avisar(mensaje, 'Subiendo comprobantes...');
+            const fallidos = await subirComprobantes(data.id, archivos);
+            texto = fallidos.length
+                ? `Movimiento guardado, pero no se pudieron subir: ${fallidos.join(', ')}. Usa "Adjuntar" en el historial para intentarlo otra vez.`
+                : `¡Movimiento guardado con ${archivos.length} comprobante${archivos.length > 1 ? 's' : ''}!`;
+        }
+        $('btnGuardar').disabled = false;
+        avisar(mensaje, texto, texto.startsWith('¡') ? 'ok' : 'error');
+        limpiarFormulario();
         cargarHistorial();
     });
+
+    // ---- Comprobantes (tickets, recibos, facturas) ----
+    // Se guardan en el almacenamiento privado de Supabase, en la carpeta del movimiento.
+    const TIPOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    const MAXIMO_BYTES = 10 * 1024 * 1024;
+
+    function revisarArchivos(archivos) {
+        const malo = archivos.find(a => !TIPOS_PERMITIDOS.includes(a.type));
+        if (malo) return `"${malo.name}" no es una foto (JPG, PNG) ni un PDF.`;
+        const grande = archivos.find(a => a.type === 'application/pdf' && a.size > MAXIMO_BYTES);
+        if (grande) return `"${grande.name}" pesa más de 10 MB.`;
+        return '';
+    }
+
+    // Las fotos del celular pesan varios MB: se reducen a 1600 px (sigue siendo legible) antes de subirlas.
+    async function comprimirImagen(archivo) {
+        if (!archivo.type.startsWith('image/')) return archivo;
+        try {
+            const imagen = await createImageBitmap(archivo);
+            const escala = Math.min(1, 1600 / Math.max(imagen.width, imagen.height));
+            const lienzo = document.createElement('canvas');
+            lienzo.width = Math.round(imagen.width * escala);
+            lienzo.height = Math.round(imagen.height * escala);
+            lienzo.getContext('2d').drawImage(imagen, 0, 0, lienzo.width, lienzo.height);
+            const blob = await new Promise(listo => lienzo.toBlob(listo, 'image/jpeg', 0.82));
+            if (!blob || blob.size >= archivo.size) return archivo;
+            return new File([blob], archivo.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+        } catch (_) {
+            return archivo; // si el navegador no puede procesarla, se sube tal cual
+        }
+    }
+
+    // Devuelve los nombres de los archivos que no se pudieron subir.
+    async function subirComprobantes(transaccionId, archivos) {
+        const fallidos = [];
+        for (const original of archivos) {
+            const archivo = await comprimirImagen(original);
+            const extension = archivo.type === 'application/pdf' ? 'pdf' : archivo.type.split('/')[1].replace('jpeg', 'jpg');
+            const ruta = `${transaccionId}/${crypto.randomUUID()}.${extension}`;
+
+            const subida = await db.storage.from('comprobantes').upload(ruta, archivo, { contentType: archivo.type });
+            const registro = subida.error ? subida : await db.from('comprobantes').insert([{
+                transaccion_id: transaccionId, ruta, nombre: original.name.slice(0, 200), tipo: archivo.type, tamano: archivo.size
+            }]);
+            if (registro.error) {
+                console.error('Error al subir comprobante:', registro.error);
+                fallidos.push(original.name);
+            }
+        }
+        return fallidos;
+    }
+
+    // El enlace dura 5 minutos: los archivos no son públicos.
+    async function verComprobante(ruta) {
+        const ventana = window.open('', '_blank'); // se abre ya, si no el navegador la bloquea
+        const { data, error } = await db.storage.from('comprobantes').createSignedUrl(ruta, 300);
+        if (error) {
+            if (ventana) ventana.close();
+            avisar(historialMensaje, 'No se pudo abrir el comprobante: ' + error.message, 'error');
+            return;
+        }
+        if (ventana) ventana.location = data.signedUrl;
+        else location.href = data.signedUrl;
+    }
 
     // ---- Historial (la base ya filtra: la secretaria solo recibe lo suyo) ----
     const historial = $('historial');
     const historialMensaje = $('historialMensaje');
+    let adjuntarA = null; // movimiento al que se le agregan comprobantes desde el historial
 
     async function cargarHistorial() {
         avisar(historialMensaje, 'Cargando...');
 
         let consulta = db
             .from('transacciones')
-            .select('id, fecha, concepto, monto, tipo, categoria_id, registrado_email, anulada, anulada_email, anulada_en, motivo_anulacion, planilla_id')
+            .select('id, fecha, concepto, monto, tipo, categoria_id, proveedor, num_documento, registrado_email, anulada, '
+                + 'anulada_email, anulada_en, motivo_anulacion, planilla_id, comprobantes(id, ruta, nombre), arbitrajes(id)')
             .order('fecha', { ascending: false })
             .order('id', { ascending: false })
             .limit(LIMITE_HISTORIAL);
@@ -227,6 +335,8 @@
         if ($('fTipo').value) consulta = consulta.eq('tipo', $('fTipo').value);
         if ($('fCategoria').value) consulta = consulta.eq('categoria_id', Number($('fCategoria').value));
         if (!$('fAnuladas').checked) consulta = consulta.eq('anulada', false);
+        // Los pagos de planilla se respaldan con los recibos firmados de la propia planilla.
+        if ($('fSinRespaldo').checked) consulta = consulta.eq('tipo', 'egreso').is('planilla_id', null).is('comprobantes', null);
 
         const { data, error } = await consulta;
         if (error) {
@@ -243,15 +353,19 @@
         else avisar(historialMensaje, '');
     }
 
+    const sinRespaldo = (m) => m.tipo === 'egreso' && !m.anulada && !m.planilla_id && !m.comprobantes.length;
+
     function pintarTotales(movs) {
         const vigentes = movs.filter(m => !m.anulada);
         const suma = (t) => vigentes.filter(m => m.tipo === t).reduce((s, m) => s + Number(m.monto), 0);
         const ingresos = suma('ingreso');
         const egresos = suma('egreso');
+        const pendientes = movs.filter(sinRespaldo).length;
         $('totales').innerHTML = `
             <div><span>Ingresos</span><strong class="ingreso">${dinero(ingresos)}</strong></div>
             <div><span>Egresos</span><strong class="egreso">${dinero(egresos)}</strong></div>
-            <div><span>Neto</span><strong>${dinero(ingresos - egresos)}</strong></div>`;
+            <div><span>Neto</span><strong>${dinero(ingresos - egresos)}</strong></div>
+            <div><span>Egresos sin comprobante</span><strong class="${pendientes ? 'egreso' : ''}">${pendientes}</strong></div>`;
     }
 
     function filaMovimiento(m) {
@@ -259,6 +373,17 @@
         const anulacion = m.anulada
             ? `<div class="nota">Anulado por ${escapar(m.anulada_email)} el ${fechaCorta(m.anulada_en.slice(0, 10))}: ${escapar(m.motivo_anulacion)}</div>`
             : '';
+        const detalle = [m.proveedor, m.num_documento && 'Doc. ' + m.num_documento].filter(Boolean).map(escapar).join(' · ');
+
+        const archivos = m.comprobantes.map((c, i) =>
+            `<button type="button" class="enlace" data-ver="${escapar(c.ruta)}" title="${escapar(c.nombre)}">📎 ${i + 1}</button>`).join(' ');
+        let respaldo = archivos;
+        if (m.planilla_id) respaldo = archivos || '<span class="ayuda-campo">Recibos de planilla</span>';
+        else if (sinRespaldo(m)) respaldo = '<span class="falta">Sin comprobante</span>';
+        if (!m.anulada) respaldo += ` <button type="button" class="btn-chico secundario" data-adjuntar="${m.id}">Adjuntar</button>`;
+        const esArbitraje = Array.isArray(m.arbitrajes) ? m.arbitrajes.length > 0 : !!m.arbitrajes;
+        if (esArbitraje) respaldo += ` <button type="button" class="btn-chico secundario" data-recibos-arbitraje="${m.id}">Recibos</button>`;
+
         // Los egresos de una planilla pagada se anulan juntos, revirtiendo el pago desde Planilla.
         let boton = '';
         if (!m.anulada && m.planilla_id) boton = '<span class="nota">Pago de planilla</span>';
@@ -266,9 +391,10 @@
         return `
             <tr class="${m.anulada ? 'anulada' : ''}">
                 <td>${fechaCorta(m.fecha)}</td>
-                <td>${escapar(m.concepto)}${anulacion}</td>
+                <td>${escapar(m.concepto)}${detalle ? `<small class="detalle">${detalle}</small>` : ''}${anulacion}</td>
                 <td>${escapar(nombreCategoria(m.categoria_id))}</td>
                 <td class="num ${m.tipo}">${signo}${dinero(m.monto)}</td>
+                <td class="respaldo">${respaldo}</td>
                 <td class="registro">${escapar(m.registrado_email)}</td>
                 <td>${boton}</td>
             </tr>`;
@@ -280,20 +406,53 @@
     });
 
     historial.addEventListener('click', async (e) => {
-        const id = e.target.dataset.anular;
+        const boton = e.target.closest('button');
+        if (!boton) return;
+
+        if (boton.dataset.ver) {
+            verComprobante(boton.dataset.ver);
+            return;
+        }
+        if (boton.dataset.recibosArbitraje) {
+            imprimirRecibosArbitraje(Number(boton.dataset.recibosArbitraje));
+            return;
+        }
+        if (boton.dataset.adjuntar) {
+            adjuntarA = Number(boton.dataset.adjuntar);
+            $('archivoAdjuntar').value = '';
+            $('archivoAdjuntar').click();
+            return;
+        }
+
+        const id = boton.dataset.anular;
         if (!id) return;
 
         const motivo = prompt('¿Por qué se anula este movimiento? (queda registrado)');
         if (motivo === null) return;
 
-        e.target.disabled = true;
+        boton.disabled = true;
         const { error } = await db.rpc('anular_transaccion', { p_id: Number(id), p_motivo: motivo });
         if (error) {
-            e.target.disabled = false;
+            boton.disabled = false;
             avisar(historialMensaje, 'Error: ' + error.message, 'error');
             return;
         }
         cargarHistorial();
+    });
+
+    $('archivoAdjuntar').addEventListener('change', async () => {
+        const archivos = Array.from($('archivoAdjuntar').files);
+        if (!archivos.length || !adjuntarA) return;
+        const problema = revisarArchivos(archivos);
+        if (problema) {
+            avisar(historialMensaje, problema, 'error');
+            return;
+        }
+        avisar(historialMensaje, 'Subiendo comprobantes...');
+        const fallidos = await subirComprobantes(adjuntarA, archivos);
+        await cargarHistorial();
+        if (fallidos.length) avisar(historialMensaje, `No se pudieron subir: ${fallidos.join(', ')}.`, 'error');
+        else avisar(historialMensaje, 'Comprobantes agregados.', 'ok');
     });
 
     // ---- Dashboard (dueño y gerente) ----
@@ -439,7 +598,7 @@
         for (let inicio = 0; ; inicio += PAGINA) {
             const { data, error } = await db
                 .from('transacciones')
-                .select('id, fecha, concepto, monto, tipo, categoria_id, registrado_email')
+                .select('id, fecha, concepto, monto, tipo, categoria_id, proveedor, num_documento, registrado_email, planilla_id, comprobantes(id)')
                 .eq('anulada', false)
                 .gte('fecha', desde)
                 .lte('fecha', hasta)
@@ -505,6 +664,13 @@
             + `<tr class="total"><td>Total</td><td class="num">${dinero(total)}</td></tr>`;
     }
 
+    // Texto de la columna "Respaldo" del corte de caja.
+    function respaldoReporte(m) {
+        if (m.comprobantes.length) return `${m.comprobantes.length} comprobante${m.comprobantes.length > 1 ? 's' : ''}`;
+        if (m.planilla_id) return 'Recibos de planilla';
+        return m.tipo === 'egreso' ? 'SIN COMPROBANTE' : '—';
+    }
+
     function pintarReporte() {
         const r = reporte;
         const t = totalesReporte(r);
@@ -521,13 +687,16 @@
             ? r.movs.map(m => `
                 <tr>
                     <td>${fechaCorta(m.fecha)}</td>
-                    <td>${escapar(m.concepto)}</td>
+                    <td>${escapar(m.concepto)}${m.proveedor || m.num_documento
+                        ? `<small class="detalle">${[m.proveedor, m.num_documento && 'Doc. ' + m.num_documento].filter(Boolean).map(escapar).join(' · ')}</small>` : ''}</td>
                     <td>${escapar(nombreCategoria(m.categoria_id))}</td>
                     <td class="num ${m.tipo}">${m.tipo === 'ingreso' ? '+' : '−'}${dinero(m.monto)}</td>
+                    <td class="${respaldoReporte(m) === 'SIN COMPROBANTE' ? 'falta' : 'registro'}">${respaldoReporte(m)}</td>
                     <td class="registro">${escapar(m.registrado_email)}</td>
                 </tr>`).join('')
-            : '<tr><td colspan="5" class="ayuda">No hay movimientos en este periodo.</td></tr>';
-        $('reportePie').textContent = `${r.movs.length} movimientos · No incluye movimientos anulados · `
+            : '<tr><td colspan="6" class="ayuda">No hay movimientos en este periodo.</td></tr>';
+        const faltan = r.movs.filter(m => respaldoReporte(m) === 'SIN COMPROBANTE').length;
+        $('reportePie').textContent = `${r.movs.length} movimientos · ${faltan} egresos sin comprobante · No incluye movimientos anulados · `
             + `Generado por ${perfil.nombre || perfil.email} el ${r.generado.toLocaleString('es')}`;
     }
 
@@ -558,7 +727,7 @@
         const libro = XLSX.utils.book_new();
 
         const resumen = [
-            ['Atlético Balboa — Corte de caja'],
+            [`${CLUB} — Corte de caja`],
             ['Periodo', `${fechaCorta(r.desde)} al ${fechaCorta(r.hasta)}`],
             [],
             ['Saldo inicial', r.saldoInicial],
@@ -576,17 +745,20 @@
         hojaResumen['!cols'] = [{ wch: 34 }, { wch: 18 }];
         XLSX.utils.book_append_sheet(libro, hojaResumen, 'Resumen');
 
-        const detalle = [['Fecha', 'Tipo', 'Concepto', 'Categoría', 'Monto (USD)', 'Registró']]
+        const detalle = [['Fecha', 'Tipo', 'Concepto', 'Categoría', 'Proveedor o persona', 'N.º documento', 'Monto (USD)', 'Respaldo', 'Registró']]
             .concat(r.movs.map(m => [
                 fechaCorta(m.fecha),
                 m.tipo === 'ingreso' ? 'Ingreso' : 'Egreso',
                 m.concepto,
                 nombreCategoria(m.categoria_id),
+                m.proveedor || '',
+                m.num_documento || '',
                 m.tipo === 'ingreso' ? Number(m.monto) : -Number(m.monto),
+                respaldoReporte(m),
                 m.registrado_email
             ]));
         const hojaDetalle = XLSX.utils.aoa_to_sheet(detalle);
-        hojaDetalle['!cols'] = [{ wch: 11 }, { wch: 9 }, { wch: 40 }, { wch: 30 }, { wch: 14 }, { wch: 30 }];
+        hojaDetalle['!cols'] = [{ wch: 11 }, { wch: 9 }, { wch: 40 }, { wch: 30 }, { wch: 28 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 30 }];
         XLSX.utils.book_append_sheet(libro, hojaDetalle, 'Movimientos');
 
         XLSX.writeFile(libro, `corte-caja_${r.desde}_a_${r.hasta}.xlsx`);
@@ -1042,6 +1214,149 @@
         XLSX.utils.book_append_sheet(libro, hoja, 'Planilla');
         XLSX.writeFile(libro, `planilla_${planilla.periodo.slice(0, 7)}.xlsx`);
     });
+
+    // ---- Pago de árbitros (todos los roles) ----
+    const FUNCIONES_ARBITRO = ['Árbitro central', 'Asistente 1', 'Asistente 2', 'Cuarto árbitro', 'Comisario', 'Otro'];
+
+    (function filasArbitros() {
+        const fila = (funcion) => `
+            <div class="arbitro">
+                <input type="text" class="a-nombre" maxlength="120" placeholder="Nombre completo" aria-label="Nombre">
+                <select class="a-funcion" aria-label="Función">${FUNCIONES_ARBITRO
+                    .map(f => `<option ${f === funcion ? 'selected' : ''}>${f}</option>`).join('')}</select>
+                <input type="text" class="a-dui" maxlength="40" placeholder="DUI" aria-label="DUI">
+                <input type="number" class="a-monto" min="0" step="0.01" placeholder="$0.00" aria-label="Monto">
+            </div>`;
+        $('arbitros').innerHTML = '<div class="arbitro arbitros-titulos"><span>Nombre</span><span>Función</span><span>DUI</span><span>Monto</span></div>'
+            + FUNCIONES_ARBITRO.slice(0, 4).map(fila).join('');
+    })();
+
+    function arbitrosDelFormulario() {
+        return Array.from(document.querySelectorAll('#arbitros .arbitro:not(.arbitros-titulos)'))
+            .map(f => ({
+                nombre: f.querySelector('.a-nombre').value.trim(),
+                funcion: f.querySelector('.a-funcion').value,
+                documento: f.querySelector('.a-dui').value.trim(),
+                monto: Number(f.querySelector('.a-monto').value || 0)
+            }))
+            .filter(a => a.nombre || a.monto);
+    }
+
+    $('arbitros').addEventListener('input', () => {
+        const total = arbitrosDelFormulario().reduce((s, a) => s + a.monto, 0);
+        $('arbTotal').textContent = total ? `Total: ${dinero(total)}` : '';
+        $('monto').value = total.toFixed(2);
+    });
+
+    // "Registrar Movimiento" con la opción de detallar árbitros: el egreso, sus árbitros
+    // y los comprobantes adjuntos se registran juntos, y luego se imprimen los recibos.
+    async function registrarArbitraje() {
+        const arbitros = arbitrosDelFormulario();
+        const archivos = Array.from($('archivos').files);
+        if (!$('concepto').value.trim()) {
+            avisar(mensaje, 'Escribe el concepto.', 'error');
+            return;
+        }
+        if (!arbitros.length || arbitros.some(a => !a.nombre || !(a.monto > 0))) {
+            avisar(mensaje, 'Cada árbitro necesita su nombre y un monto mayor a 0.', 'error');
+            return;
+        }
+        const problema = revisarArchivos(archivos);
+        if (problema) {
+            avisar(mensaje, problema, 'error');
+            return;
+        }
+
+        $('btnGuardar').disabled = true;
+        avisar(mensaje, 'Registrando...');
+        const { data: transaccionId, error } = await db.rpc('registrar_pago_arbitraje', {
+            p_fecha: fecha.value,
+            p_concepto: $('concepto').value,
+            p_proveedor: $('proveedor').value,
+            p_num_documento: $('numDocumento').value,
+            p_partido: $('arbPartido').value,
+            p_competicion: $('arbCompeticion').value,
+            p_forma_pago: $('arbForma').value,
+            p_arbitros: arbitros
+        });
+        if (error) {
+            $('btnGuardar').disabled = false;
+            avisar(mensaje, 'Error: ' + error.message, 'error');
+            return;
+        }
+
+        let texto = 'Pago registrado. Imprime los recibos y hazlos firmar.';
+        if (archivos.length) {
+            avisar(mensaje, 'Subiendo comprobantes...');
+            const fallidos = await subirComprobantes(transaccionId, archivos);
+            if (fallidos.length) texto = `Pago registrado, pero no se pudieron subir: ${fallidos.join(', ')}. Usa "Adjuntar" en el historial.`;
+        }
+        $('btnGuardar').disabled = false;
+        avisar(mensaje, texto, texto.startsWith('Pago registrado.') ? 'ok' : 'error');
+        $('arbTotal').textContent = '';
+        limpiarFormulario();
+        cargarHistorial();
+        imprimirRecibosArbitraje(transaccionId);
+    }
+
+    async function imprimirRecibosArbitraje(transaccionId) {
+        const { data, error } = await db
+            .from('arbitrajes')
+            .select('id, partido, competicion, forma_pago, transaccion:transacciones(fecha), lineas:arbitraje_lineas(id, nombre, funcion, documento, monto)')
+            .eq('transaccion_id', transaccionId)
+            .single();
+        if (error) {
+            avisar(historialMensaje, 'No se pudieron cargar los recibos: ' + error.message, 'error');
+            return;
+        }
+        data.lineas.sort((a, b) => FUNCIONES_ARBITRO.indexOf(a.funcion) - FUNCIONES_ARBITRO.indexOf(b.funcion));
+        imprimir(data.lineas.map((l, i) => documentoReciboArbitraje(data, l, i + 1)).join(''));
+    }
+
+    function documentoReciboArbitraje(arb, l, numero) {
+        const casilla = (forma) => `<span class="casilla">${arb.forma_pago === forma ? '☒' : '☐'} ${FORMAS_PAGO[forma].toUpperCase()}</span>`;
+        return `
+            <div class="documento recibo">
+                <div class="recibo-banda">
+                    <img src="img/logo.jpg" alt="">
+                    <strong>${CLUB.toUpperCase()}</strong>
+                    <span>RECIBO<br>DE PAGO</span>
+                </div>
+                <h2>PAGO DE ARBITRAJE</h2>
+                <p class="recibo-sub">Comprobante individual de pago · N.º ARB-${String(arb.id).padStart(4, '0')}-${numero}</p>
+
+                <dl class="recibo-datos">
+                    <dt>NOMBRE COMPLETO</dt><dd>${escapar(l.nombre)}</dd>
+                    <dt>FUNCIÓN</dt><dd>${escapar(l.funcion)}</dd>
+                    <dt>PARTIDO</dt><dd>${escapar(arb.partido)}</dd>
+                    ${arb.competicion ? `<dt>COMPETICIÓN / JORNADA</dt><dd>${escapar(arb.competicion)}</dd>` : ''}
+                    <dt>FECHA</dt><dd>${fechaCorta(arb.transaccion.fecha).replaceAll('/', ' / ')}</dd>
+                </dl>
+
+                <h3>DETALLE DEL PAGO</h3>
+                <table class="recibo-tabla">
+                    <thead><tr><th>CONCEPTO</th><th class="num">MONTO (US$)</th></tr></thead>
+                    <tbody>
+                        <tr><td>Honorarios de arbitraje — ${escapar(l.funcion)}</td><td class="num">${dinero(l.monto)}</td></tr>
+                        <tr class="resaltado"><td>TOTAL PAGADO</td><td class="num">${dinero(l.monto)}</td></tr>
+                    </tbody>
+                </table>
+                <p class="recibo-letras">TOTAL EN LETRAS: ${montoEnLetras(l.monto)}</p>
+
+                <h3>FORMA DE PAGO</h3>
+                <div class="recibo-formas">${Object.keys(FORMAS_PAGO).map(casilla).join('')}</div>
+
+                <h3>CONSTANCIA DE PAGO</h3>
+                <p class="recibo-constancia">Por medio del presente documento se deja constancia de que la persona identificada ha recibido
+                    del ${CLUB} el monto indicado, en concepto de honorarios de arbitraje por el partido señalado.</p>
+
+                <div class="recibo-firmas">
+                    <div><span>FIRMA DE QUIEN RECIBE</span><b>DUI: ${escapar(l.documento || '______________')}</b></div>
+                    <div><span>ENTREGADO POR (${CLUB.toUpperCase()})</span><b>Nombre: ______________________</b></div>
+                </div>
+                <p class="recibo-pie">${CLUB.toUpperCase()} • COMPROBANTE INTERNO DE PAGO</p>
+            </div>`;
+    }
 
     // ---- Personal del club ----
     async function cargarPersonal() {

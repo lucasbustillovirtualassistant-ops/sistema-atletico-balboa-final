@@ -114,15 +114,47 @@
                 <label>Fecha
                     <input type="date" id="fecha" required>
                 </label>
+                <label>Categoría
+                    <select id="categoria" required></select>
+                </label>
                 <label>Concepto
                     <input type="text" id="concepto" placeholder="Ej. Taquilla jornada 5" maxlength="200" required>
                 </label>
                 <label>Monto
                     <input type="number" id="monto" min="0.01" step="0.01" placeholder="0.00" required>
                 </label>
-                <label>Categoría
-                    <select id="categoria" required></select>
+                <label>Proveedor o persona <span class="opcional">(opcional)</span>
+                    <input type="text" id="proveedor" maxlength="120" placeholder="Ej. Distribuidora La Unión, árbitro central">
                 </label>
+                <label>N.º de factura, ticket o recibo <span class="opcional">(opcional)</span>
+                    <input type="text" id="numDocumento" maxlength="60">
+                </label>
+                <label>Comprobantes
+                    <input type="file" id="archivos" accept="image/jpeg,image/png,image/webp,application/pdf" multiple>
+                    <span class="ayuda-campo" id="ayudaArchivos">Foto o PDF del ticket, recibo o factura. Desde el celular puedes tomar la foto directamente.</span>
+                </label>
+                <label class="check" id="opcionArbitraje" hidden>
+                    <input type="checkbox" id="detallarArbitros">
+                    Detallar los árbitros e imprimir un recibo para cada uno <span class="opcional">(opcional)</span>
+                </label>
+                <fieldset class="grupo-campos" id="camposArbitraje" hidden disabled>
+                    <p class="ayuda">El monto se calcula sumando lo de cada árbitro. Se imprime un recibo para que cada uno lo firme;
+                        después fotografía los recibos firmados y súbelos con "Adjuntar" en el historial.</p>
+                    <label>Partido <input type="text" id="arbPartido" maxlength="150" placeholder="Ej. Atlético Balboa vs. C.D. Municipal" required></label>
+                    <label>Competición / jornada <span class="opcional">(opcional)</span>
+                        <input type="text" id="arbCompeticion" maxlength="120" placeholder="Ej. Liga de Ascenso, jornada 6">
+                    </label>
+                    <label>Forma de pago
+                        <select id="arbForma">
+                            <option value="efectivo">Efectivo</option>
+                            <option value="transferencia">Transferencia</option>
+                            <option value="cheque">Cheque</option>
+                            <option value="otro">Otro</option>
+                        </select>
+                    </label>
+                    <div class="arbitros" id="arbitros"></div>
+                    <p class="ayuda">Deja en blanco las filas que no se usen. <strong id="arbTotal"></strong></p>
+                </fieldset>
                 <button type="submit" id="btnGuardar">Registrar Movimiento</button>
                 <p id="mensaje" class="mensaje" role="status"></p>
             </form>
@@ -140,6 +172,7 @@
                         </select>
                     </label>
                     <label>Categoría <select id="fCategoria"></select></label>
+                    <label class="check"><input type="checkbox" id="fSinRespaldo"> Solo egresos sin comprobante</label>
                     <label class="check"><input type="checkbox" id="fAnuladas"> Mostrar anulados</label>
                     <button type="submit">Filtrar</button>
                 </form>
@@ -151,13 +184,15 @@
                         <thead>
                             <tr>
                                 <th>Fecha</th><th>Concepto</th><th>Categoría</th>
-                                <th class="num">Monto</th><th>Registró</th><th></th>
+                                <th class="num">Monto</th><th>Respaldo</th><th>Registró</th><th></th>
                             </tr>
                         </thead>
                         <tbody id="historial"></tbody>
                     </table>
                 </div>
                 <p id="historialMensaje" class="mensaje" role="status"></p>
+                <!-- Se usa al pulsar "Adjuntar" en una fila del historial -->
+                <input type="file" id="archivoAdjuntar" accept="image/jpeg,image/png,image/webp,application/pdf" multiple hidden>
             </div>
         </section>
 
@@ -302,7 +337,7 @@
                 <div class="tabla-scroll">
                     <table class="tabla">
                         <thead>
-                            <tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th class="num">Monto</th><th>Registró</th></tr>
+                            <tr><th>Fecha</th><th>Concepto</th><th>Categoría</th><th class="num">Monto</th><th>Respaldo</th><th>Registró</th></tr>
                         </thead>
                         <tbody id="reporteDetalle"></tbody>
                     </table>

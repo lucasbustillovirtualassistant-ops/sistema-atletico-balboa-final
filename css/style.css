@@ -94,6 +94,14 @@ label.check input { width: auto; margin: 0; }
 .btn-chico { width: auto; padding: 4px 10px; font-size: 0.8rem; }
 .btn-chico.secundario { background: var(--borde); color: var(--texto); }
 .btn-chico.secundario:hover { background: #d1d5db; }
+.opcional { font-weight: normal; color: var(--texto-suave); }
+.ayuda-campo { display: block; font-weight: normal; font-size: 0.8rem; color: var(--texto-suave); margin-top: 4px; }
+input[type="file"] { padding: 8px; background: var(--fondo); }
+.tabla small.detalle { display: block; font-size: 0.78rem; color: var(--texto-suave); }
+.tabla td.respaldo { white-space: nowrap; }
+.falta { color: #b45309; font-weight: 600; font-size: 0.8rem; }
+button.enlace { width: auto; padding: 2px 6px; background: var(--dorado-claro); color: var(--negro); font-size: 0.8rem; }
+button.enlace:hover { background: #ecdcae; }
 .con-boton { display: flex; gap: 6px; align-items: stretch; margin-top: 4px; }
 .con-boton input { margin-top: 0; }
 
@@ -167,6 +175,17 @@ summary { cursor: pointer; color: var(--rojo-oscuro); }
 .neto-final td { font-size: 1.05rem; background: var(--dorado-claro); }
 .planilla-doc .tabla { margin-top: 16px; font-size: 0.75rem; }
 .planilla-doc .tabla th, .planilla-doc .tabla td { padding: 5px 4px; }
+
+/* Pago de árbitros */
+[hidden] { display: none !important; }
+fieldset.grupo-campos { border: 0; padding: 0; margin: 0; min-width: 0; }
+details.plegable { margin-top: 16px; }
+details.plegable summary { font-weight: 600; font-size: 1rem; color: var(--negro); }
+details.plegable[open] summary { margin-bottom: 12px; }
+.arbitro { display: grid; grid-template-columns: 1.6fr 1.2fr 1fr 0.8fr; gap: 6px; margin-bottom: 8px; }
+.arbitro input, .arbitro select { margin: 0; padding: 8px; font-size: 0.9rem; }
+.arbitros-titulos { font-size: 0.75rem; font-weight: 600; color: var(--texto-suave); margin-bottom: 4px; }
+@media (max-width: 560px) { .arbitro { grid-template-columns: 1fr 1fr; } .arbitros-titulos { display: none; } }
 
 /* Recibo de pago: mismo formato que el del club ("Cancelación de sueldo y bonos") */
 .recibo { font-size: 0.92rem; padding: 0 24px; }
