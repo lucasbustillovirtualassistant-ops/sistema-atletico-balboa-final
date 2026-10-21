@@ -131,6 +131,7 @@
         document.querySelectorAll('.seccion').forEach(s => s.classList.toggle('activa', s.id === id));
         document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('activo', a.dataset.seccion === id));
 
+        if (id === 'dashboard') cargarDashboard();
         if (id === 'movimientos') cargarHistorial();
         if (id === 'ajustes') { cargarUsuarios(); pintarCategorias(); }
         if (id === 'cuenta') $('cuentaDatos').textContent = `${perfil.email} · ${ROLES[perfil.rol]}`;
@@ -292,6 +293,116 @@
         }
         cargarHistorial();
     });
+
+    // ---- Dashboard (dueño y gerente) ----
+    // La base devuelve totales ya agrupados por mes, tipo y categoría, sin anulados.
+    let resumen = [];
+    const NOMBRES_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+    // "2026-10" → "oct 2026"
+    const nombreMes = (clave) => `${NOMBRES_MES[Number(clave.slice(5, 7)) - 1]} ${clave.slice(0, 4)}`;
+
+    // Claves "AAAA-MM" de los últimos n meses, del más antiguo al actual.
+    function ultimosMeses(n) {
+        const [a, m] = hoy().split('-').map(Number);
+        return Array.from({ length: n }, (_, i) => {
+            const d = new Date(a, m - 1 - (n - 1 - i), 1);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        });
+    }
+
+    const sumar = (filas, t) => filas.filter(r => r.tipo === t).reduce((s, r) => s + Number(r.total), 0);
+
+    async function cargarDashboard() {
+        avisar($('dashboardMensaje'), 'Cargando...');
+        const { data, error } = await db.rpc('resumen_mensual');
+        if (error) {
+            console.error('Error al cargar el resumen:', error);
+            avisar($('dashboardMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        resumen = data.map(r => ({ ...r, mes: r.mes.slice(0, 7) }));
+        avisar($('dashboardMensaje'), resumen.length ? '' : 'Todavía no hay movimientos registrados.');
+        pintarKpis();
+        pintarMeses();
+        pintarCategoriasPeriodo();
+    }
+
+    function pintarKpis() {
+        const actual = hoy().slice(0, 7);
+        const delMes = resumen.filter(r => r.mes === actual);
+        const saldo = sumar(resumen, 'ingreso') - sumar(resumen, 'egreso');
+        const ingMes = sumar(delMes, 'ingreso');
+        const egrMes = sumar(delMes, 'egreso');
+        $('kpis').innerHTML = `
+            <div class="kpi principal"><span>Saldo en caja</span><strong>${dinero(saldo)}</strong>
+                <small>Todos los ingresos menos todos los egresos</small></div>
+            <div class="kpi"><span>Ingresos de ${nombreMes(actual)}</span><strong>${dinero(ingMes)}</strong></div>
+            <div class="kpi"><span>Egresos de ${nombreMes(actual)}</span><strong>${dinero(egrMes)}</strong></div>
+            <div class="kpi"><span>Resultado del mes</span><strong>${dinero(ingMes - egrMes)}</strong></div>`;
+    }
+
+    function pintarMeses() {
+        const meses = ultimosMeses(12).map(clave => {
+            const filas = resumen.filter(r => r.mes === clave);
+            return { clave, ingresos: sumar(filas, 'ingreso'), egresos: sumar(filas, 'egreso') };
+        });
+        const maximo = Math.max(1, ...meses.map(m => Math.max(m.ingresos, m.egresos)));
+        const alto = (v) => v ? Math.max(2, (v / maximo) * 100) : 0; // un monto chico sigue visible
+
+        $('graficoMeses').innerHTML = meses.map(m => `
+            <div class="mes" title="${nombreMes(m.clave)}&#10;Ingresos: ${dinero(m.ingresos)}&#10;Egresos: ${dinero(m.egresos)}&#10;Resultado: ${dinero(m.ingresos - m.egresos)}">
+                <div class="columnas-mes">
+                    <i class="barra ingreso-bg" style="height:${alto(m.ingresos)}%"></i>
+                    <i class="barra egreso-bg" style="height:${alto(m.egresos)}%"></i>
+                </div>
+                <span>${NOMBRES_MES[Number(m.clave.slice(5)) - 1]}</span>
+            </div>`).join('');
+
+        $('tablaMeses').innerHTML = meses.slice().reverse().map(m => `
+            <tr>
+                <td>${nombreMes(m.clave)}</td>
+                <td class="num">${dinero(m.ingresos)}</td>
+                <td class="num">${dinero(m.egresos)}</td>
+                <td class="num">${dinero(m.ingresos - m.egresos)}</td>
+            </tr>`).join('');
+    }
+
+    // Primer mes ("AAAA-MM") incluido en el periodo elegido; null = desde siempre.
+    function inicioPeriodo(valor) {
+        if (valor === 'todo') return null;
+        if (valor === 'mes') return hoy().slice(0, 7);
+        if (valor === 'anio') return hoy().slice(0, 4) + '-01';
+        return ultimosMeses(Number(valor))[0];
+    }
+
+    function barrasCategorias(filas, t) {
+        const porCategoria = {};
+        filas.filter(r => r.tipo === t).forEach(r => {
+            porCategoria[r.categoria_id] = (porCategoria[r.categoria_id] || 0) + Number(r.total);
+        });
+        const lista = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]);
+        if (!lista.length) return '<p class="ayuda">Sin movimientos en este periodo.</p>';
+
+        const total = lista.reduce((s, [, v]) => s + v, 0);
+        return lista.map(([id, valor]) => `
+            <div class="barra-cat">
+                <div class="barra-cat-texto">
+                    <span>${escapar(nombreCategoria(Number(id)))}</span>
+                    <strong>${dinero(valor)} <small>${Math.round((valor / total) * 100)}%</small></strong>
+                </div>
+                <div class="barra-cat-fondo"><i class="${t}-bg" style="width:${(valor / lista[0][1]) * 100}%"></i></div>
+            </div>`).join('');
+    }
+
+    function pintarCategoriasPeriodo() {
+        const desde = inicioPeriodo($('periodo').value);
+        const filas = desde ? resumen.filter(r => r.mes >= desde) : resumen;
+        $('catIngresos').innerHTML = barrasCategorias(filas, 'ingreso');
+        $('catEgresos').innerHTML = barrasCategorias(filas, 'egreso');
+    }
+
+    $('periodo').addEventListener('change', pintarCategoriasPeriodo);
 
     // ---- Ajustes: usuarios (solo dueño) ----
     const usuarios = $('usuarios');

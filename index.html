@@ -50,7 +50,51 @@
     <main>
         <section id="dashboard" class="seccion">
             <h2>Panel de Control</h2>
-            <p class="pronto">Próximamente: gráficos de ingresos vs. egresos y saldo en caja.</p>
+            <div class="kpis" id="kpis"></div>
+
+            <h2>Ingresos y egresos por mes</h2>
+            <div class="tarjeta">
+                <div class="leyenda">
+                    <span><i class="muestra ingreso-bg"></i> Ingresos</span>
+                    <span><i class="muestra egreso-bg"></i> Egresos</span>
+                </div>
+                <div class="grafico" id="graficoMeses" role="img" aria-label="Ingresos y egresos de los últimos 12 meses"></div>
+                <details>
+                    <summary>Ver como tabla</summary>
+                    <div class="tabla-scroll">
+                        <table class="tabla">
+                            <thead><tr><th>Mes</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Resultado</th></tr></thead>
+                            <tbody id="tablaMeses"></tbody>
+                        </table>
+                    </div>
+                </details>
+            </div>
+
+            <h2>Por categoría</h2>
+            <div class="tarjeta">
+                <form class="filtros" id="periodoForm">
+                    <label>Periodo
+                        <select id="periodo">
+                            <option value="mes">Este mes</option>
+                            <option value="3">Últimos 3 meses</option>
+                            <option value="anio">Este año</option>
+                            <option value="12">Últimos 12 meses</option>
+                            <option value="todo">Todo</option>
+                        </select>
+                    </label>
+                </form>
+                <div class="columnas">
+                    <div>
+                        <h3>Ingresos</h3>
+                        <div id="catIngresos" class="barras"></div>
+                    </div>
+                    <div>
+                        <h3>Egresos</h3>
+                        <div id="catEgresos" class="barras"></div>
+                    </div>
+                </div>
+            </div>
+            <p id="dashboardMensaje" class="mensaje" role="status"></p>
         </section>
 
         <section id="movimientos" class="seccion">
