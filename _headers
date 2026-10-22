@@ -1,0 +1,8 @@
+# Cabeceras de seguridad para Cloudflare Pages.
+# noindex: mientras sea de prueba, que Google no lo muestre en búsquedas.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self), microphone=(), geolocation=()
+  X-Robots-Tag: noindex
