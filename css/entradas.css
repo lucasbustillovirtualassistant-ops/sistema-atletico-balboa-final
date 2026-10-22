@@ -1,0 +1,111 @@
+/* Página pública de compra de entradas (celular primero). Mismos colores del escudo. */
+:root {
+    --rojo: #e30613;
+    --rojo-oscuro: #b3050f;
+    --negro: #141414;
+    --dorado: #c9a23f;
+    --dorado-claro: #f6eed6;
+    --fondo: #f4f3f0;
+    --texto: #1f2937;
+    --texto-suave: #6b7280;
+    --borde: #e5e7eb;
+    --verde: #15803d;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: var(--fondo); color: var(--texto); }
+[hidden] { display: none !important; }
+
+.aviso-demo { background: var(--dorado); color: var(--negro); font-size: 0.85rem; font-weight: 600; text-align: center; padding: 8px 16px; }
+
+.cabecera {
+    display: flex; align-items: center; gap: 14px;
+    background: white; padding: 12px 16px;
+    border-bottom: 4px solid var(--rojo); box-shadow: 0 2px 0 var(--dorado);
+}
+.cabecera img { width: 56px; height: 56px; flex: none; }
+.cabecera h1 { margin: 0; font-size: 1.3rem; text-transform: uppercase; color: var(--negro); }
+.cabecera p { margin: 0; color: var(--rojo); font-weight: 600; font-size: 0.9rem; }
+
+main { max-width: 520px; margin: 0 auto; padding: 20px 16px 32px; }
+h2 { font-size: 1.15rem; margin: 24px 0 12px; }
+section > h2:first-child { margin-top: 0; }
+.suave { color: var(--texto-suave); font-size: 0.9rem; }
+.tarjeta { background: white; padding: 18px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); }
+
+label { display: block; margin-bottom: 14px; font-size: 0.9rem; font-weight: 600; }
+label small { display: block; font-weight: normal; color: var(--texto-suave); margin-top: 4px; }
+input { display: block; width: 100%; margin-top: 4px; padding: 12px; font: inherit; font-weight: normal; border: 1px solid #d1d5db; border-radius: 6px; }
+input:focus { outline: 2px solid var(--dorado); border-color: var(--dorado); }
+button { width: 100%; padding: 14px; font: inherit; font-weight: 600; background: var(--rojo); color: white; border: none; border-radius: 8px; cursor: pointer; }
+button:hover { background: var(--rojo-oscuro); }
+button:disabled { background: #d1d5db; color: var(--texto-suave); cursor: default; }
+button.secundario { background: var(--negro); margin-top: 16px; }
+button.enlace { width: auto; padding: 6px; background: none; color: var(--texto-suave); font-weight: normal; text-decoration: underline; }
+.error { color: #b91c1c; font-size: 0.9rem; }
+.seguro { font-size: 0.82rem; color: var(--texto-suave); margin: 12px 0 0; }
+
+/* Partidos */
+.partidos { display: grid; gap: 12px; }
+.partido {
+    display: block; width: 100%; text-align: left; color: var(--texto);
+    background: white; border-radius: 10px; padding: 16px; border-left: 6px solid var(--rojo);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); font-weight: normal;
+}
+.partido:hover { background: var(--dorado-claro); }
+.partido .rival { font-size: 1.2rem; font-weight: 700; margin: 2px 0; }
+.partido .torneo { color: var(--texto-suave); font-size: 0.85rem; }
+.partido .desde { color: var(--rojo); font-weight: 700; margin-top: 8px; font-size: 0.95rem; }
+.volver { width: auto; padding: 6px 0; background: none; color: var(--texto-suave); font-weight: normal; margin-bottom: 8px; }
+.volver:hover { background: none; color: var(--texto); }
+.partido-elegido { background: var(--negro); color: white; border-radius: 10px; padding: 14px 16px; border-bottom: 4px solid var(--dorado); }
+.partido-elegido .rival { font-size: 1.2rem; font-weight: 700; }
+.partido-elegido .cuando { color: #d1d5db; font-size: 0.9rem; }
+
+/* Localidades con contador */
+.localidades { display: grid; gap: 10px; }
+.localidad { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: white; border-radius: 10px; padding: 14px 16px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06); }
+.localidad .nombre { font-weight: 700; }
+.localidad .precio { color: var(--rojo); font-weight: 700; }
+.localidad .agotado { color: var(--texto-suave); font-weight: 600; }
+.contador { display: flex; align-items: center; gap: 10px; flex: none; }
+.contador button { width: 40px; height: 40px; padding: 0; border-radius: 50%; font-size: 1.3rem; line-height: 1; }
+.contador button.menos { background: var(--borde); color: var(--texto); }
+.contador span { min-width: 1.5em; text-align: center; font-weight: 700; font-size: 1.1rem; }
+
+/* Pasarela simulada: estilo neutro a propósito, para que se note que es otra página */
+.pasarela-fondo { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: flex-start; justify-content: center; padding: 24px 12px; overflow-y: auto; z-index: 10; }
+.pasarela { width: 100%; max-width: 420px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); }
+.pasarela-barra { display: flex; justify-content: space-between; align-items: center; background: #eef2f7; padding: 10px 14px; font-size: 0.85rem; color: #334155; }
+.etiqueta-sim { background: var(--dorado); color: var(--negro); font-weight: 700; font-size: 0.72rem; padding: 2px 8px; border-radius: 99px; }
+.pasarela-cuerpo { padding: 18px; }
+.pasarela-comercio { margin: 0; color: #475569; font-size: 0.9rem; }
+.pasarela-monto { font-size: 2rem; font-weight: 700; margin: 4px 0 14px; color: #0f172a; }
+.pasarela h3 { font-size: 1rem; margin: 0 0 4px; }
+.pasarela-nota { font-size: 0.8rem; color: #64748b; margin: 0 0 14px; }
+.pasarela input { background: #f8fafc; }
+.pasarela-fila { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pasarela-pagar { background: #1d4ed8; }
+.pasarela-pagar:hover { background: #1e40af; }
+.pasarela-acciones { display: flex; justify-content: space-between; flex-wrap: wrap; margin-top: 10px; }
+
+/* Entradas compradas */
+.listo { background: #dcfce7; border-left: 6px solid var(--verde); border-radius: 10px; padding: 14px 16px; }
+.listo h2 { margin: 0 0 6px; color: var(--verde); }
+.listo p { margin: 6px 0; }
+.boletos { display: grid; gap: 16px; margin-top: 16px; }
+.boleto { position: relative; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1); text-align: center; }
+.boleto-banda { background: var(--rojo); color: white; padding: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 3px solid var(--dorado); }
+.boleto-cuerpo { padding: 14px 16px 18px; }
+.boleto .rival { font-size: 1.15rem; font-weight: 700; }
+.boleto .cuando { color: var(--texto-suave); font-size: 0.9rem; }
+.boleto .localidad-boleto { color: var(--rojo); font-weight: 700; font-size: 1.2rem; margin-top: 8px; }
+.boleto .qr { width: 220px; height: 220px; margin: 12px auto 6px; }
+.boleto .qr svg { width: 100%; height: 100%; display: block; }
+.boleto .codigo { font-family: ui-monospace, Consolas, monospace; font-size: 1.15rem; font-weight: 700; letter-spacing: 0.08em; }
+.boleto .demo-sello {
+    position: absolute; top: 46%; left: -10%; right: -10%; transform: rotate(-18deg);
+    background: rgba(201, 162, 63, 0.88); color: var(--negro); font-weight: 800; padding: 6px; font-size: 0.95rem; pointer-events: none;
+}
+
+.pie { text-align: center; color: var(--texto-suave); font-size: 0.8rem; padding: 0 16px 24px; }

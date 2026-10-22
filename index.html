@@ -47,10 +47,12 @@
         <a href="#dashboard" data-seccion="dashboard" data-roles="dueno gerente">Dashboard</a>
         <a href="#movimientos" data-seccion="movimientos" data-roles="dueno gerente secretaria">Movimientos</a>
         <a href="#inventario" data-seccion="inventario" data-roles="dueno gerente secretaria">Inventario</a>
+        <a href="#boleteria" data-seccion="boleteria" data-roles="dueno gerente secretaria">Boletería</a>
+        <a href="#puerta" data-seccion="puerta" data-roles="dueno gerente secretaria porteria">Puerta</a>
         <a href="#planilla" data-seccion="planilla" data-roles="dueno gerente">Planilla</a>
         <a href="#reportes" data-seccion="reportes" data-roles="dueno gerente">Reportes</a>
         <a href="#ajustes" data-seccion="ajustes" data-roles="dueno">Ajustes</a>
-        <a href="#cuenta" data-seccion="cuenta" data-roles="dueno gerente secretaria">Mi cuenta</a>
+        <a href="#cuenta" data-seccion="cuenta" data-roles="dueno gerente secretaria porteria">Mi cuenta</a>
     </nav>
 
     <main>
@@ -264,6 +266,104 @@
             </div>
         </section>
 
+        <section id="boleteria" class="seccion">
+            <div class="solo-gestion">
+                <h2>Nuevo partido de local</h2>
+                <form id="partidoForm" class="tarjeta">
+                    <div class="filtros">
+                        <label>Fecha <input type="date" id="paFecha" required></label>
+                        <label>Hora <input type="time" id="paHora"></label>
+                        <label>Rival <input type="text" id="paRival" maxlength="80" placeholder="Ej. C.D. Municipal Limeño" required></label>
+                        <label>Torneo <input type="text" id="paTorneo" maxlength="80" placeholder="Opcional"></label>
+                    </div>
+                    <div class="localidad-fila localidad-titulos"><span>Localidad</span><span>Precio</span><span>Cupo <span class="opcional">(opcional)</span></span><span></span></div>
+                    <div id="paLocalidades"></div>
+                    <div class="barra-acciones">
+                        <button type="button" class="secundario" id="btnAgregarLocalidad">Agregar localidad</button>
+                        <button type="submit" id="btnCrearPartido">Crear partido</button>
+                    </div>
+                    <p id="partidoMensaje" class="mensaje" role="status"></p>
+                </form>
+            </div>
+
+            <h2>Partidos</h2>
+            <div class="tarjeta">
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead><tr><th>Fecha</th><th>Rival</th><th class="num">Impresas</th><th class="num">Entraron</th>
+                            <th class="num">Recaudado</th><th>Estado</th><th></th></tr></thead>
+                        <tbody id="partidos"></tbody>
+                    </table>
+                </div>
+                <p id="partidosMensaje" class="mensaje" role="status"></p>
+            </div>
+
+            <div id="partidoDetalle" hidden>
+                <h2 id="partidoTitulo"></h2>
+                <div class="tarjeta">
+                    <div class="tabla-scroll">
+                        <table class="tabla">
+                            <thead><tr><th>Localidad</th><th class="num">Precio</th><th class="num">Impresas</th><th class="num">Entraron</th>
+                                <th class="num">Devueltas sin vender</th><th class="num">Vendidas</th><th class="num">Importe</th></tr></thead>
+                            <tbody id="localidades"></tbody>
+                        </table>
+                    </div>
+                    <div class="barra-acciones" id="liquidarAcciones">
+                        <label>Fecha del ingreso <input type="date" id="liqFecha" required></label>
+                        <button type="button" id="btnLiquidar">Liquidar taquilla</button>
+                    </div>
+                    <p class="ayuda" id="liquidarAyuda">Al terminar el partido, cuenta las entradas que regresaron sin vender y escríbelas en cada localidad.
+                        Vendidas = impresas − devueltas. Se registra un ingreso en "Taquilla" con la hoja de liquidación adjunta.
+                        Si "Entraron" es mayor que "Vendidas", entraron personas con entradas que no se cobraron.</p>
+                    <p id="liquidarMensaje" class="mensaje" role="status"></p>
+                </div>
+
+                <div class="solo-gestion" id="talonariosBloque">
+                    <h2>Imprimir talonario</h2>
+                    <form id="talonarioForm" class="tarjeta">
+                        <div class="filtros">
+                            <label>Localidad <select id="taLocalidad" required></select></label>
+                            <label>Cantidad de entradas <input type="number" id="taCantidad" min="1" max="1000" step="1" required></label>
+                            <button type="submit" id="btnTalonario">Generar e imprimir</button>
+                        </div>
+                        <p class="ayuda">Salen 10 entradas por hoja carta, numeradas y cada una con su código QR. Cada entrada sirve una sola vez y solo el día del partido.
+                            Si después hacen falta más, genera otro talonario: la numeración continúa.</p>
+                        <p id="talonarioMensaje" class="mensaje" role="status"></p>
+                        <div class="tabla-scroll">
+                            <table class="tabla">
+                                <thead><tr><th>Impreso</th><th>Localidad</th><th>Numeración</th><th>Imprimió</th><th></th></tr></thead>
+                                <tbody id="talonarios"></tbody>
+                            </table>
+                        </div>
+                    </form>
+                    <div class="barra-acciones">
+                        <button type="button" class="secundario" id="btnCancelarPartido">Cancelar partido</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="puerta" class="seccion">
+            <div class="angosto">
+                <h2>Control de entradas</h2>
+                <div class="tarjeta">
+                    <div id="lector" class="lector"></div>
+                    <div id="resultadoEntrada" class="resultado-entrada" role="status" aria-live="assertive" hidden></div>
+                    <div class="barra-acciones">
+                        <button type="button" id="btnCamara">Encender cámara</button>
+                    </div>
+                    <form id="codigoForm" class="con-boton codigo-manual">
+                        <input type="text" id="codigoManual" maxlength="20" autocomplete="off" autocapitalize="characters"
+                               placeholder="O escribe el código: ABCDE-FGHJK" aria-label="Código de la entrada" required>
+                        <button type="submit" class="btn-chico">Validar</button>
+                    </form>
+                    <p class="ayuda" id="contadorPuerta"></p>
+                    <p class="ayuda">Apunta la cámara al código QR de la entrada. Verde: puede pasar. Rojo: no pasa
+                        (ya se usó, es de otro día o no es del club). Rompe o marca cada entrada que pase.</p>
+                </div>
+            </div>
+        </section>
+
         <section id="planilla" class="seccion">
             <h2>Planilla del mes</h2>
             <div class="tarjeta">
@@ -423,6 +523,7 @@
                     <label>Rol
                         <select id="nuRol">
                             <option value="secretaria">Secretaria</option>
+                            <option value="porteria">Portería (solo revisa entradas)</option>
                             <option value="gerente">Gerente</option>
                             <option value="dueno">Dueño</option>
                         </select>

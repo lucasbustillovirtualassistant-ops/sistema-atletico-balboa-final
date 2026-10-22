@@ -9,7 +9,7 @@
     const SUPABASE_URL = 'https://hcxyxcfipnqdgpppbqed.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjeHl4Y2ZpcG5xZGdwcHBicWVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI1MDk4OTksImV4cCI6MjEwODA4NTg5OX0.rUijoO2Zo9hGxFLv1x4le53jV5ZB66rqK9BX39uJMtA'; // Supabase > Project Settings > API > anon public
     const LIMITE_HISTORIAL = 200;
-    const ROLES = { dueno: 'Dueño', gerente: 'Gerente', secretaria: 'Secretaria' };
+    const ROLES = { dueno: 'Dueño', gerente: 'Gerente', secretaria: 'Secretaria', porteria: 'Portería' };
 
     // ---- Cliente de Supabase ----
     if (!window.supabase || typeof window.supabase.createClient !== 'function') {
@@ -58,6 +58,7 @@
     const loginMensaje = $('loginMensaje');
 
     function mostrarLogin() {
+        apagarCamara();
         perfil = null;
         $('pantallaLogin').hidden = false;
         $('app').hidden = true;
@@ -90,7 +91,7 @@
         document.querySelectorAll('.solo-gestion').forEach(el => { el.hidden = !puede('dueno', 'gerente'); });
         $('tituloHistorial').textContent = puede('secretaria') ? 'Mis movimientos registrados' : 'Historial';
 
-        await cargarCategorias();
+        if (perfil.rol !== 'porteria') await cargarCategorias(); // Portería solo valida entradas
         mostrarSeccion();
     }
 
@@ -125,9 +126,10 @@
     // ---- Navegación por secciones (#dashboard, #movimientos, ...) ----
     function mostrarSeccion() {
         if (!perfil) return;
-        let id = location.hash.slice(1) || 'movimientos';
+        const inicio = perfil.rol === 'porteria' ? 'puerta' : 'movimientos';
+        let id = location.hash.slice(1) || inicio;
         const enlace = document.querySelector(`.nav a[data-seccion="${CSS.escape(id)}"]`);
-        if (!enlace || enlace.hidden) id = 'movimientos';
+        if (!enlace || enlace.hidden) id = inicio;
 
         document.querySelectorAll('.seccion').forEach(s => s.classList.toggle('activa', s.id === id));
         document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('activo', a.dataset.seccion === id));
@@ -135,6 +137,8 @@
         if (id === 'dashboard') cargarDashboard();
         if (id === 'planilla') cargarSeccionPlanilla();
         if (id === 'inventario') cargarInventario();
+        if (id === 'boleteria') cargarBoleteria();
+        if (id !== 'puerta') apagarCamara();
         if (id === 'movimientos') cargarHistorial();
         if (id === 'ajustes') { cargarUsuarios(); pintarCategorias(); pintarAjustesDocumentos(); }
         if (id === 'cuenta') $('cuentaDatos').textContent = `${perfil.email} · ${ROLES[perfil.rol]}`;
@@ -1716,6 +1720,577 @@
                     </tr>`;
             }).join('')
             : '<tr><td colspan="6" class="ayuda">Todavía no hay movimientos.</td></tr>';
+    }
+
+    // ---- Boletería (partidos de local) ----
+    // El dueño y el gerente crean partidos e imprimen talonarios; cualquiera de los tres liquida la taquilla.
+    // Los códigos de las entradas no se pueden leer de la tabla: solo salen al imprimir un talonario.
+    let partidos = [];
+    let partidoActual = null;  // fila de partidos_boleteria
+    let localidadesPartido = []; // filas de resumen_partido
+    const LOCALIDADES_BASE = [{ nombre: 'General', precio: 7 }, { nombre: 'Tribuna poniente', precio: 12 }];
+    const horaCorta = (h) => (h ? h.slice(0, 5) : '');
+
+    function filaLocalidad(l = {}) {
+        const fila = document.createElement('div');
+        fila.className = 'localidad-fila';
+        fila.innerHTML = `
+            <input type="text" class="l-nombre" maxlength="40" value="${escapar(l.nombre || '')}" aria-label="Localidad" required>
+            <input type="number" class="l-precio" min="0.01" step="0.01" value="${l.precio || ''}" aria-label="Precio" required>
+            <input type="number" class="l-cupo" min="1" step="1" aria-label="Cupo">
+            <button type="button" class="btn-chico secundario" data-quitar>Quitar</button>`;
+        $('paLocalidades').appendChild(fila);
+    }
+
+    function reiniciarPartidoForm() {
+        $('partidoForm').reset();
+        $('paLocalidades').innerHTML = '';
+        LOCALIDADES_BASE.forEach(filaLocalidad);
+    }
+    reiniciarPartidoForm();
+
+    $('btnAgregarLocalidad').addEventListener('click', () => filaLocalidad());
+    $('paLocalidades').addEventListener('click', (e) => {
+        if ('quitar' in e.target.dataset && $('paLocalidades').children.length > 1) e.target.closest('.localidad-fila').remove();
+    });
+
+    $('partidoForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const aviso = $('partidoMensaje');
+        const localidades = Array.from($('paLocalidades').children).map(f => ({
+            nombre: f.querySelector('.l-nombre').value.trim(),
+            precio: Number(f.querySelector('.l-precio').value),
+            cupo: f.querySelector('.l-cupo').value || null
+        }));
+        $('btnCrearPartido').disabled = true;
+        const { data: id, error } = await db.rpc('crear_partido', {
+            p_fecha: $('paFecha').value,
+            p_hora: $('paHora').value || null,
+            p_rival: $('paRival').value,
+            p_torneo: $('paTorneo').value,
+            p_localidades: localidades
+        });
+        $('btnCrearPartido').disabled = false;
+        if (error) {
+            avisar(aviso, 'Error: ' + (error.code === '23505' ? 'hay dos localidades con el mismo nombre.' : error.message), 'error');
+            return;
+        }
+        avisar(aviso, 'Partido creado. Ahora imprime los talonarios de cada localidad.', 'ok');
+        reiniciarPartidoForm();
+        await cargarBoleteria();
+        abrirPartido(id);
+    });
+
+    async function cargarBoleteria() {
+        $('liqFecha').value = $('liqFecha').value || hoy();
+        const { data, error } = await db.rpc('partidos_boleteria');
+        if (error) {
+            avisar($('partidosMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        partidos = data;
+        pintarPartidos();
+        if (partidoActual) await abrirPartido(partidoActual.id);
+    }
+
+    function estadoPartido(p) {
+        if (p.cancelado) return ['Cancelado', 'cancelado'];
+        if (p.liquidado) return ['Liquidado', 'pagada'];
+        if (p.fecha > hoy()) return ['Próximo', 'borrador'];
+        if (p.fecha === hoy()) return ['Hoy', 'hoy'];
+        return ['Por liquidar', 'borrador'];
+    }
+
+    function pintarPartidos() {
+        $('partidos').innerHTML = partidos.length ? partidos.map(p => {
+            const [texto, clase] = estadoPartido(p);
+            return `
+                <tr>
+                    <td>${fechaCorta(p.fecha)} <small class="detalle">${horaCorta(p.hora)}</small></td>
+                    <td>${escapar(p.rival)}${p.torneo ? `<small class="detalle">${escapar(p.torneo)}</small>` : ''}</td>
+                    <td class="num">${p.impresas}</td>
+                    <td class="num">${p.escaneadas}</td>
+                    <td class="num">${p.liquidado ? dinero(p.recaudado) : '—'}</td>
+                    <td><span class="estado ${clase}">${texto}</span></td>
+                    <td><button type="button" class="btn-chico" data-abrir="${p.id}">Abrir</button></td>
+                </tr>`;
+        }).join('') : '<tr><td colspan="7">Todavía no hay partidos.</td></tr>';
+    }
+
+    $('partidos').addEventListener('click', (e) => {
+        if (e.target.dataset.abrir) abrirPartido(Number(e.target.dataset.abrir));
+    });
+
+    async function abrirPartido(id) {
+        partidoActual = partidos.find(p => p.id === id) || null;
+        if (!partidoActual) {
+            $('partidoDetalle').hidden = true;
+            return;
+        }
+        const resumen = await db.rpc('resumen_partido', { p_partido_id: id });
+        const lotes = resumen.error ? {} : await db.from('talonarios')
+            .select('id, localidad_id, desde, hasta, created_at, creado_email')
+            .in('localidad_id', resumen.data.map(l => l.localidad_id))
+            .order('created_at', { ascending: false });
+        if (resumen.error || lotes.error) {
+            avisar($('partidosMensaje'), 'Error: ' + (resumen.error || lotes.error).message, 'error');
+            return;
+        }
+        localidadesPartido = resumen.data;
+        pintarDetallePartido(lotes.data);
+        $('partidoDetalle').hidden = false;
+    }
+
+    function pintarDetallePartido(lotes) {
+        const p = partidoActual;
+        const abierto = !p.cancelado && !p.liquidado;
+        const [texto, clase] = estadoPartido(p);
+        $('partidoTitulo').innerHTML = `vs ${escapar(p.rival)} · ${fechaCorta(p.fecha)} ${horaCorta(p.hora)}
+            <span class="estado ${clase}">${texto}</span>`;
+
+        $('localidades').innerHTML = localidadesPartido.map(l => `
+            <tr data-localidad="${l.localidad_id}" data-precio="${l.precio}" data-impresas="${l.impresas}">
+                <td>${escapar(l.nombre)}${l.cupo ? `<small class="detalle">cupo ${l.cupo}</small>` : ''}</td>
+                <td class="num">${dinero(l.precio)}</td>
+                <td class="num">${l.impresas}</td>
+                <td class="num">${l.escaneadas}</td>
+                <td class="num">${abierto
+                    ? `<input type="number" class="l-devueltas" min="0" max="${l.impresas}" step="1" placeholder="0" aria-label="Devueltas de ${escapar(l.nombre)}">`
+                    : (l.devueltas ?? '—')}</td>
+                <td class="num l-vendidas">${l.vendidas ?? ''}</td>
+                <td class="num l-importe">${l.vendidas != null ? dinero(l.vendidas * l.precio) : ''}</td>
+            </tr>`).join('') + '<tr class="total"><td colspan="5">Total</td><td class="num" id="liqVendidas"></td><td class="num" id="liqTotal"></td></tr>';
+        calcularLiquidacion();
+
+        $('liquidarAcciones').hidden = !abierto;
+        $('liquidarAyuda').hidden = !abierto;
+        avisar($('liquidarMensaje'), p.liquidado
+            ? 'Taquilla liquidada: el ingreso y la hoja de liquidación están en Movimientos.'
+            : p.cancelado ? 'Partido cancelado: sus entradas ya no sirven en la puerta.' : '');
+
+        $('talonariosBloque').hidden = !puede('dueno', 'gerente') || !abierto;
+        $('taLocalidad').innerHTML = localidadesPartido
+            .map(l => `<option value="${l.localidad_id}">${escapar(l.nombre)} · ${dinero(l.precio)}</option>`).join('');
+        const nombreLocalidad = (id) => (localidadesPartido.find(l => l.localidad_id === id) || {}).nombre;
+        $('talonarios').innerHTML = lotes.length ? lotes.map(t => `
+            <tr>
+                <td>${new Date(t.created_at).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                <td>${escapar(nombreLocalidad(t.localidad_id))}</td>
+                <td>N.º ${t.desde} al ${t.hasta} <small class="detalle">${t.hasta - t.desde + 1} entradas</small></td>
+                <td class="registro">${escapar(t.creado_email)}</td>
+                <td><button type="button" class="btn-chico secundario" data-reimprimir="${t.id}" data-localidad="${t.localidad_id}">Reimprimir</button></td>
+            </tr>`).join('') : '<tr><td colspan="5">Todavía no se ha impreso ningún talonario.</td></tr>';
+    }
+
+    // Vendidas = impresas - devueltas, por localidad
+    function lineasLiquidacion() {
+        return Array.from($('localidades').querySelectorAll('tr[data-localidad]')).map(f => {
+            const impresas = Number(f.dataset.impresas);
+            const campo = f.querySelector('.l-devueltas');
+            const devueltas = campo ? Number(campo.value || 0) : 0;
+            return { fila: f, localidad_id: Number(f.dataset.localidad), precio: Number(f.dataset.precio), impresas, devueltas, vendidas: impresas - devueltas };
+        });
+    }
+
+    function calcularLiquidacion() {
+        if (partidoActual.cancelado || partidoActual.liquidado) {
+            const total = localidadesPartido.reduce((s, l) => s + (l.vendidas || 0) * l.precio, 0);
+            $('liqVendidas').textContent = localidadesPartido.reduce((s, l) => s + (l.vendidas || 0), 0);
+            $('liqTotal').textContent = dinero(total);
+            return;
+        }
+        let vendidas = 0, total = 0;
+        for (const l of lineasLiquidacion()) {
+            vendidas += l.vendidas;
+            total += l.vendidas * l.precio;
+            l.fila.querySelector('.l-vendidas').textContent = l.vendidas;
+            l.fila.querySelector('.l-importe').textContent = dinero(l.vendidas * l.precio);
+        }
+        $('liqVendidas').textContent = vendidas;
+        $('liqTotal').textContent = dinero(total);
+    }
+    $('localidades').addEventListener('input', calcularLiquidacion);
+
+    $('btnLiquidar').addEventListener('click', async () => {
+        const aviso = $('liquidarMensaje');
+        const lineas = lineasLiquidacion();
+        if (lineas.some(l => !Number.isInteger(l.devueltas) || l.devueltas < 0 || l.vendidas < 0)) {
+            avisar(aviso, 'Las devueltas deben ser números enteros y no más que las impresas.', 'error');
+            return;
+        }
+        const total = lineas.reduce((s, l) => s + l.vendidas * l.precio, 0);
+        if (!total) {
+            avisar(aviso, 'No hay entradas vendidas que liquidar.', 'error');
+            return;
+        }
+        if (!confirm(`Se registrará un ingreso de ${dinero(total)} en Taquilla. ¿Continuar?`)) return;
+
+        const ventana = window.open('', '_blank'); // se abre ya, si no el navegador la bloquea
+        $('btnLiquidar').disabled = true;
+        avisar(aviso, 'Registrando...');
+        const { data: tx, error } = await db.rpc('liquidar_taquilla', {
+            p_partido_id: partidoActual.id,
+            p_fecha: $('liqFecha').value,
+            p_devueltas: lineas.map(({ localidad_id, devueltas }) => ({ localidad_id, devueltas }))
+        });
+        $('btnLiquidar').disabled = false;
+        if (error) {
+            if (ventana) ventana.close();
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        }
+
+        let resultado = `Taquilla liquidada: ingreso de ${dinero(total)} registrado.`;
+        let problema = false;
+        try {
+            const pdf = await hojaLiquidacion(tx, partidoActual, lineas.map(l => ({
+                ...l, nombre: localidadesPartido.find(x => x.localidad_id === l.localidad_id).nombre,
+                escaneadas: localidadesPartido.find(x => x.localidad_id === l.localidad_id).escaneadas
+            })), total);
+            const fallidos = await subirComprobantes(tx, [new File([pdf], `liquidacion-taquilla-${tx}.pdf`, { type: 'application/pdf' })]);
+            if (fallidos.length) {
+                problema = true;
+                resultado += ' La hoja de liquidación no se pudo adjuntar; descárgala y agrégala desde Movimientos.';
+            }
+            const enlace = URL.createObjectURL(pdf);
+            if (ventana) ventana.location = enlace;
+            else location.href = enlace;
+        } catch (err) {
+            if (ventana) ventana.close();
+            console.error('Error al generar la liquidación:', err);
+            problema = true;
+            resultado += ' No se pudo generar la hoja de liquidación: ' + err.message;
+        }
+        await cargarBoleteria();
+        avisar(aviso, resultado, problema ? 'error' : 'ok');
+    });
+
+    $('btnCancelarPartido').addEventListener('click', async () => {
+        if (!confirm(`¿Cancelar el partido contra ${partidoActual.rival}? Sus entradas dejarán de servir en la puerta.`)) return;
+        const { error } = await db.from('partidos').update({ cancelado: true }).eq('id', partidoActual.id);
+        if (error) {
+            avisar($('talonarioMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        await cargarBoleteria();
+    });
+
+    // ---- Talonarios: 10 entradas por hoja carta, cada una con su QR ----
+    $('talonarioForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const aviso = $('talonarioMensaje');
+        const localidadId = Number($('taLocalidad').value);
+        const cantidad = Number($('taCantidad').value);
+        const localidad = localidadesPartido.find(l => l.localidad_id === localidadId);
+        if (!confirm(`Se crearán ${cantidad} entradas de ${localidad.nombre}, válidas para entrar. Guarda las hojas impresas en un lugar seguro. ¿Continuar?`)) return;
+
+        const ventana = window.open('', '_blank');
+        $('btnTalonario').disabled = true;
+        avisar(aviso, 'Generando las entradas...');
+        const { data, error } = await db.rpc('generar_talonario', { p_localidad_id: localidadId, p_cantidad: cantidad });
+        if (error) {
+            $('btnTalonario').disabled = false;
+            if (ventana) ventana.close();
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        }
+        await abrirTalonario(ventana, localidad, data, aviso);
+        $('btnTalonario').disabled = false;
+        $('talonarioForm').reset();
+        await cargarBoleteria();
+    });
+
+    $('talonarios').addEventListener('click', async (e) => {
+        if (!e.target.dataset.reimprimir) return;
+        const aviso = $('talonarioMensaje');
+        const localidad = localidadesPartido.find(l => l.localidad_id === Number(e.target.dataset.localidad));
+        const ventana = window.open('', '_blank');
+        e.target.disabled = true;
+        const { data, error } = await db.rpc('entradas_talonario', { p_talonario_id: Number(e.target.dataset.reimprimir) });
+        if (error) {
+            e.target.disabled = false;
+            if (ventana) ventana.close();
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        }
+        await abrirTalonario(ventana, localidad, data, aviso);
+        e.target.disabled = false;
+    });
+
+    async function abrirTalonario(ventana, localidad, entradas, aviso) {
+        try {
+            avisar(aviso, 'Armando el PDF...');
+            const pdf = await pdfTalonario(partidoActual, localidad, entradas);
+            const enlace = URL.createObjectURL(pdf);
+            if (ventana) ventana.location = enlace;
+            else location.href = enlace;
+            avisar(aviso, `Listo: ${entradas.length} entradas de ${localidad.nombre} (N.º ${entradas[0].numero} al ${entradas[entradas.length - 1].numero}).`, 'ok');
+        } catch (err) {
+            if (ventana) ventana.close();
+            console.error('Error al armar el talonario:', err);
+            avisar(aviso, 'Las entradas se crearon, pero no se pudo armar el PDF: ' + err.message + '. Usa "Reimprimir".', 'error');
+        }
+    }
+
+    // La librería de QR solo se descarga al imprimir el primer talonario.
+    function cargarLibreriaQr() {
+        if (window.qrcode) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('No se pudo descargar la librería de QR. Revisa tu conexión.'));
+            document.head.appendChild(s);
+        });
+    }
+
+    // Dibuja el QR con rectángulos (queda nítido al imprimir); une los cuadros seguidos de cada fila.
+    function dibujarQr(doc, texto, x, y, lado) {
+        const qr = window.qrcode(0, 'M');
+        qr.addData(texto);
+        qr.make();
+        const n = qr.getModuleCount();
+        const celda = lado / n;
+        doc.setFillColor(0);
+        for (let r = 0; r < n; r++) {
+            for (let c = 0; c < n; c++) {
+                if (!qr.isDark(r, c)) continue;
+                let fin = c;
+                while (fin + 1 < n && qr.isDark(r, fin + 1)) fin++;
+                doc.rect(x + c * celda, y + r * celda, (fin - c + 1) * celda + 0.01, celda + 0.01, 'F');
+                c = fin;
+            }
+        }
+    }
+
+    const codigoVisible = (c) => `${c.slice(0, 5)}-${c.slice(5)}`;
+
+    async function pdfTalonario(partido, localidad, entradas) {
+        await Promise.all([cargarLibreriaPdf(), cargarLibreriaQr()]);
+        const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'letter' });
+        let escudo = null;
+        try {
+            escudo = await cargarImagen('img/logo.jpg');
+        } catch (_) {
+            // sin escudo la entrada sigue siendo válida
+        }
+        const MARGEN = 8, COLS = 2, FILAS = 5;
+        const W = (215.9 - MARGEN * 2) / COLS, H = (279.4 - MARGEN * 2) / FILAS;
+        const dia = new Date(partido.fecha + 'T12:00:00').toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
+        const cuando = [dia, horaCorta(partido.hora)].filter(Boolean).join(' · ');
+
+        entradas.forEach((e, i) => {
+            const enHoja = i % (COLS * FILAS);
+            if (i && !enHoja) doc.addPage('letter');
+            const x = MARGEN + (enHoja % COLS) * W, y = MARGEN + Math.floor(enHoja / COLS) * H;
+
+            // líneas de corte
+            doc.setLineDashPattern([1.5, 1.5], 0).setDrawColor(170).setLineWidth(0.2);
+            doc.rect(x, y, W, H);
+            doc.setLineDashPattern([], 0);
+
+            // franja con el nombre del club
+            doc.setFillColor(227, 6, 19).rect(x + 2, y + 2, W - 4, 7.5, 'F');
+            doc.setFillColor(201, 162, 63).rect(x + 2, y + 9.5, W - 4, 0.8, 'F');
+            doc.setTextColor(255).setFont('helvetica', 'bold').setFontSize(8.5);
+            doc.text(CLUB.toUpperCase(), x + 5, y + 7);
+
+            if (escudo) doc.addImage(escudo, 'JPEG', x + 4, y + 13, 15, 15, 'escudo');
+            const xt = escudo ? x + 22 : x + 5;
+            doc.setTextColor(0).setFontSize(10.5);
+            doc.text(doc.splitTextToSize(`vs ${partido.rival}`, 40).slice(0, 2), xt, y + 17);
+            doc.setFont('helvetica', 'normal').setFontSize(7);
+            doc.text(doc.splitTextToSize(cuando, 42).slice(0, 2), xt, y + 26);
+            if (partido.torneo) doc.text(doc.splitTextToSize(partido.torneo, 42)[0], xt, y + 30.5);
+
+            doc.setFont('helvetica', 'bold').setFontSize(13).setTextColor(227, 6, 19);
+            doc.text(doc.splitTextToSize(localidad.nombre.toUpperCase(), 56)[0], x + 5, y + 40);
+            doc.setTextColor(0).setFontSize(13);
+            doc.text(dinero(localidad.precio), x + 5, y + 46.5);
+            doc.setFont('helvetica', 'normal').setFontSize(9);
+            doc.text(`N.º ${String(e.numero).padStart(4, '0')}`, x + 32, y + 46.5);
+
+            // el QR necesita borde blanco alrededor para que el celular lo lea rápido
+            const lado = 29;
+            dibujarQr(doc, e.codigo, x + W - lado - 6, y + 15, lado);
+            doc.setFont('courier', 'bold').setFontSize(8.5);
+            doc.text(codigoVisible(e.codigo), x + W - 6 - lado / 2, y + 48.5, { align: 'center' });
+
+            doc.setFont('helvetica', 'normal').setFontSize(5.5).setTextColor(110);
+            doc.text('Válida para una persona y una sola entrada. No se aceptan copias.', x + 5, y + H - 2.5);
+        });
+        return doc.output('blob');
+    }
+
+    // Hoja de liquidación de taquilla: se imprime, se firma y queda adjunta al ingreso.
+    async function hojaLiquidacion(tx, partido, lineas, total) {
+        await cargarLibreriaPdf();
+        const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'letter' });
+        const X = 18, DERECHA = 215.9 - 18;
+        let escudo = null;
+        try {
+            escudo = await cargarImagen('img/logo.jpg');
+        } catch (_) {
+            // sin escudo la hoja sigue siendo válida
+        }
+        let y = 15;
+        if (escudo) doc.addImage(escudo, 'JPEG', X, y, 22, 22);
+        const xt = escudo ? X + 26 : X;
+        doc.setFont('helvetica', 'bold').setFontSize(13).text(CLUB, xt, y + 8);
+        doc.setFont('helvetica', 'normal').setFontSize(9).text('La Unión, El Salvador', xt, y + 13);
+        doc.setFont('helvetica', 'bold').setFontSize(11).text('LIQUIDACIÓN DE TAQUILLA', DERECHA, y + 6, { align: 'right' });
+        doc.setFont('helvetica', 'normal').setFontSize(9).text(`Ingreso N.º ${tx}`, DERECHA, y + 11.5, { align: 'right' });
+        doc.setDrawColor(227, 6, 19).setLineWidth(1).line(X, y + 26, DERECHA, y + 26);
+        doc.setDrawColor(201, 162, 63).setLineWidth(0.5).line(X, y + 27.3, DERECHA, y + 27.3);
+
+        y += 36;
+        doc.setFontSize(10);
+        doc.text(`Partido: vs ${partido.rival}${partido.torneo ? ' (' + partido.torneo + ')' : ''}`, X, y);
+        doc.text(`Fecha del partido: ${fechaCorta(partido.fecha)} ${horaCorta(partido.hora)}`, X, y += 6);
+        doc.text(`Liquidó: ${perfil.nombre || perfil.email} · ${new Date().toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}`, X, y += 6);
+
+        const cols = [['Localidad', X + 2, 'left'], ['Precio', X + 80, 'right'], ['Impresas', X + 100, 'right'], ['Devueltas', X + 122, 'right'],
+            ['Vendidas', X + 142, 'right'], ['Entraron', X + 160, 'right'], ['Importe', DERECHA - 2, 'right']];
+        y += 10;
+        doc.setDrawColor(0).setLineWidth(0.3).line(X, y - 4.5, DERECHA, y - 4.5);
+        doc.setFont('helvetica', 'bold').setFontSize(9);
+        cols.forEach(([t, cx, a]) => doc.text(t, cx, y, { align: a }));
+        doc.line(X, y + 2, DERECHA, y + 2);
+        doc.setFont('helvetica', 'normal');
+        for (const l of lineas) {
+            y += 7;
+            [l.nombre, dinero(l.precio), l.impresas, l.devueltas, l.vendidas, l.escaneadas, dinero(l.vendidas * l.precio)]
+                .forEach((v, i) => doc.text(String(v), cols[i][1], y, { align: cols[i][2] }));
+        }
+        doc.line(X, y += 3, DERECHA, y);
+        doc.setFont('helvetica', 'bold').setFontSize(11);
+        doc.text('TOTAL', cols[5][1], y += 7, { align: 'right' });
+        doc.text(dinero(total), DERECHA - 2, y, { align: 'right' });
+        doc.setFont('helvetica', 'normal').setFontSize(8.5);
+        doc.text(montoEnLetras(total), X, y);
+
+        const sinCobrar = lineas.filter(l => l.escaneadas > l.vendidas);
+        if (sinCobrar.length) {
+            doc.setTextColor(180, 83, 9);
+            doc.text(doc.splitTextToSize('Atención: entraron más personas que entradas vendidas en ' +
+                sinCobrar.map(l => `${l.nombre} (${l.escaneadas - l.vendidas} de más)`).join(', ') +
+                '. Revisar entradas que no se devolvieron ni se cobraron.', DERECHA - X), X, y += 10);
+            doc.setTextColor(0);
+        }
+
+        y = Math.max(y + 40, 200);
+        doc.setFontSize(9);
+        [[X + 40, 'Entregó (taquilla)'], [DERECHA - 40, 'Recibió (tesorería)']].forEach(([cx, t]) => {
+            doc.line(cx - 32, y, cx + 32, y);
+            doc.text(t, cx, y + 5, { align: 'center' });
+        });
+        return doc.output('blob');
+    }
+
+    // ---- Puerta: validar entradas con la cámara del celular ----
+    let lector = null;          // Html5Qrcode encendido
+    let validando = false;
+    let ultimoCodigo = '', ultimoEn = 0;
+    let dejoPasar = 0;
+
+    function cargarLibreriaLector() {
+        if (window.Html5Qrcode) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('No se pudo descargar el lector de QR. Revisa tu conexión.'));
+            document.head.appendChild(s);
+        });
+    }
+
+    async function encenderCamara() {
+        $('btnCamara').disabled = true;
+        try {
+            await cargarLibreriaLector();
+            lector = new window.Html5Qrcode('lector');
+            await lector.start({ facingMode: 'environment' }, { fps: 10, qrbox: (w, h) => { const lado = Math.floor(Math.min(w, h) * 0.7); return { width: lado, height: lado }; } },
+                (texto) => validarEntrada(texto), () => { /* cuadro sin QR */ });
+            $('btnCamara').textContent = 'Apagar cámara';
+        } catch (err) {
+            console.error('Error al encender la cámara:', err);
+            lector = null;
+            mostrarResultado('aviso', 'No se pudo encender la cámara', 'Da permiso de cámara al navegador, o escribe el código a mano.');
+        }
+        $('btnCamara').disabled = false;
+    }
+
+    async function apagarCamara() {
+        if (!lector) return;
+        const l = lector;
+        lector = null;
+        try { await l.stop(); l.clear(); } catch (_) { /* ya estaba apagada */ }
+        $('btnCamara').textContent = 'Encender cámara';
+    }
+
+    $('btnCamara').addEventListener('click', () => (lector ? apagarCamara() : encenderCamara()));
+
+    $('codigoForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        validarEntrada($('codigoManual').value, true);
+        $('codigoManual').value = '';
+    });
+
+    // Pitido corto: agudo si pasa, grave si no (en la puerta hay ruido y no siempre se ve la pantalla).
+    function pitar(bien) {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = ctx.createOscillator();
+            o.frequency.value = bien ? 1200 : 300;
+            o.connect(ctx.destination);
+            o.start();
+            o.stop(ctx.currentTime + (bien ? 0.15 : 0.5));
+            o.onended = () => ctx.close();
+        } catch (_) { /* sin sonido */ }
+        if (navigator.vibrate) navigator.vibrate(bien ? 100 : [200, 100, 200]);
+    }
+
+    function mostrarResultado(clase, titulo, detalle) {
+        const caja = $('resultadoEntrada');
+        caja.className = 'resultado-entrada ' + clase;
+        caja.innerHTML = `<strong>${escapar(titulo)}</strong>${detalle ? `<span>${escapar(detalle)}</span>` : ''}`;
+        caja.hidden = false;
+    }
+
+    async function validarEntrada(texto, manual) {
+        const codigo = String(texto).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        // la cámara lee el mismo QR varias veces por segundo
+        if (validando || (!manual && codigo === ultimoCodigo && Date.now() - ultimoEn < 4000)) return;
+        validando = true;
+        ultimoCodigo = codigo;
+        const { data: r, error } = await db.rpc('validar_entrada', { p_codigo: codigo });
+        ultimoEn = Date.now();
+        validando = false;
+
+        if (error) {
+            pitar(false);
+            mostrarResultado('aviso', 'No se pudo revisar', 'Sin conexión o sin permiso. Intenta otra vez. ' + error.message);
+            return;
+        }
+        const lugar = r.localidad ? `${r.localidad} · N.º ${String(r.numero).padStart(4, '0')}` : '';
+        if (r.resultado === 'ok') {
+            dejoPasar++;
+            $('contadorPuerta').textContent = `Desde este celular han pasado ${dejoPasar} personas.`;
+            pitar(true);
+            mostrarResultado('ok', 'PASA', lugar);
+            return;
+        }
+        pitar(false);
+        if (r.resultado === 'usada') {
+            const hora = new Date(r.usada_en).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+            mostrarResultado('no', 'NO PASA: ya se usó', `${lugar}. Entró a las ${hora} (${r.usada_email || 'otro portero'}).`);
+        } else if (r.resultado === 'otro_dia') {
+            mostrarResultado('no', 'NO PASA: no es de hoy', `Es del partido vs ${r.rival} del ${fechaCorta(r.fecha)}.`);
+        } else if (r.resultado === 'cancelado') {
+            mostrarResultado('no', 'NO PASA: partido cancelado', `vs ${r.rival} del ${fechaCorta(r.fecha)}.`);
+        } else {
+            mostrarResultado('no', 'NO PASA: entrada no válida', 'El código no es de una entrada del club.');
+        }
     }
 
     // ---- Personal del club ----

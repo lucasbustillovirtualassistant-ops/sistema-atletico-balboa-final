@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entradas · Atlético Balboa</title>
+    <link rel="icon" type="image/png" href="img/icono.png">
+    <link rel="stylesheet" href="css/entradas.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
+    <script src="js/entradas.js" defer></script>
+</head>
+<body>
+    <div class="aviso-demo">Demostración: no se cobra nada y estas entradas no sirven en la puerta.</div>
+
+    <header class="cabecera">
+        <img src="img/logo.jpg" alt="Escudo del Club Deportivo Atlético Balboa">
+        <div>
+            <h1>Atlético Balboa</h1>
+            <p>Entradas oficiales</p>
+        </div>
+    </header>
+
+    <main>
+        <!-- Paso 1: partido -->
+        <section id="pasoPartido">
+            <h2>Próximos partidos</h2>
+            <div id="listaPartidos" class="partidos"><p class="suave">Cargando…</p></div>
+        </section>
+
+        <!-- Paso 2: localidades y datos -->
+        <section id="pasoCompra" hidden>
+            <button type="button" class="volver" id="btnVolver">‹ Otros partidos</button>
+            <div class="partido-elegido" id="partidoElegido"></div>
+
+            <h2>Elige tus entradas</h2>
+            <div id="listaLocalidades" class="localidades"></div>
+            <p class="suave">Sin asientos numerados: entras por la puerta de tu localidad y te sientas donde gustes.</p>
+
+            <h2>Tus datos</h2>
+            <form id="datosForm" class="tarjeta" novalidate>
+                <label>Nombre completo
+                    <input id="cNombre" autocomplete="name" required>
+                </label>
+                <label>Correo electrónico
+                    <input id="cCorreo" type="email" autocomplete="email" inputmode="email" required>
+                    <small>Ahí te llegan tus entradas.</small>
+                </label>
+                <label>WhatsApp <span class="suave">(opcional)</span>
+                    <input id="cTelefono" type="tel" autocomplete="tel" inputmode="tel" placeholder="7000 0000">
+                </label>
+                <p class="error" id="datosError" hidden></p>
+                <button type="submit" id="btnPagar" disabled>Elige al menos una entrada</button>
+                <p class="seguro">🔒 El pago con tarjeta se hace en la página segura de la pasarela de pago. El club nunca ve los datos de tu tarjeta.</p>
+            </form>
+        </section>
+
+        <!-- Paso 4: entradas compradas -->
+        <section id="pasoListo" hidden>
+            <div class="listo">
+                <h2>¡Pago aprobado!</h2>
+                <p>Muestra este código en la puerta. Cada entrada sirve <strong>una sola vez</strong>: no compartas capturas.</p>
+                <p class="suave" id="listoCorreo"></p>
+            </div>
+            <div id="boletos" class="boletos"></div>
+            <button type="button" class="secundario" id="btnOtraCompra">Comprar más entradas</button>
+        </section>
+    </main>
+
+    <!-- Paso 3: pasarela (simulada). En la versión real esto es la página de la pasarela, en su propia dirección. -->
+    <div class="pasarela-fondo" id="pasarela" hidden>
+        <div class="pasarela" role="dialog" aria-modal="true" aria-labelledby="pasarelaTitulo">
+            <div class="pasarela-barra">
+                <span>🔒 pasarela-de-pago.com</span>
+                <span class="etiqueta-sim">SIMULACIÓN</span>
+            </div>
+            <div class="pasarela-cuerpo">
+                <p class="pasarela-comercio">Pago a <strong>Club Deportivo Atlético Balboa</strong></p>
+                <p class="pasarela-monto" id="pasarelaMonto"></p>
+                <h3 id="pasarelaTitulo">Tarjeta de débito o crédito</h3>
+                <p class="pasarela-nota">Tarjeta de prueba ya escrita. No pongas datos reales: aquí no se envía nada.</p>
+                <label>Número de tarjeta
+                    <input value="4242 4242 4242 4242" readonly>
+                </label>
+                <div class="pasarela-fila">
+                    <label>Vence <input value="12/30" readonly></label>
+                    <label>CVV <input value="123" readonly></label>
+                </div>
+                <p class="error" id="pasarelaError" hidden></p>
+                <button type="button" class="pasarela-pagar" id="btnAprobar"></button>
+                <div class="pasarela-acciones">
+                    <button type="button" class="enlace" id="btnRechazar">Simular tarjeta rechazada</button>
+                    <button type="button" class="enlace" id="btnCancelarPago">Cancelar y volver al club</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="pie">Club Deportivo Atlético Balboa · La Unión, El Salvador</footer>
+</body>
+</html>

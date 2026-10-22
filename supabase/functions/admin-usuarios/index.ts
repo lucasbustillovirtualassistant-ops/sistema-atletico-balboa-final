@@ -5,7 +5,7 @@
 //   accion "clave": { user_id, password }   (restablecer contraseña olvidada)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 
-const ROLES = ['dueno', 'gerente', 'secretaria'];
+const ROLES = ['dueno', 'gerente', 'secretaria', 'porteria'];
 const MIN_CLAVE = 10;
 
 const cors = {
