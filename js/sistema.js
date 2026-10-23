@@ -2335,16 +2335,18 @@
     }
 
     // ---- Puerta: validar entradas con la cámara del celular ----
-    let lector = null;          // Html5Qrcode encendido
+    // Lector propio (cámara + jsQR) en vez de una librería que arma el video por su cuenta:
+    // en iPhone el video tiene que llevar playsinline y muted, si no la cámara se enciende pero no se ve.
+    let lector = null;          // { stream, video } mientras la cámara está encendida
     let validando = false;
     let ultimoCodigo = '', ultimoEn = 0;
     let dejoPasar = 0;
 
     function cargarLibreriaLector() {
-        if (window.Html5Qrcode) return Promise.resolve();
+        if (window.jsQR) return Promise.resolve();
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
-            s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+            s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
             s.onload = resolve;
             s.onerror = () => reject(new Error('No se pudo descargar el lector de QR. Revisa tu conexión.'));
             document.head.appendChild(s);
@@ -2353,25 +2355,55 @@
 
     async function encenderCamara() {
         $('btnCamara').disabled = true;
+        let stream = null;
         try {
             await cargarLibreriaLector();
-            lector = new window.Html5Qrcode('lector');
-            await lector.start({ facingMode: 'environment' }, { fps: 10, qrbox: (w, h) => { const lado = Math.floor(Math.min(w, h) * 0.7); return { width: lado, height: lado }; } },
-                (texto) => validarEntrada(texto), () => { /* cuadro sin QR */ });
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+            const video = document.createElement('video');
+            video.setAttribute('playsinline', '');
+            video.muted = true;
+            video.srcObject = stream;
+            $('lector').replaceChildren(video);
+            await video.play();
+            lector = { stream, video };
             $('btnCamara').textContent = 'Apagar cámara';
+            leerCuadros(lector);
         } catch (err) {
             console.error('Error al encender la cámara:', err);
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            $('lector').replaceChildren();
             lector = null;
             mostrarResultado('aviso', 'No se pudo encender la cámara', 'Da permiso de cámara al navegador, o escribe el código a mano.');
         }
         $('btnCamara').disabled = false;
     }
 
+    // Unas 8 veces por segundo copia el cuadro del video (achicado) y busca un QR.
+    function leerCuadros(activo) {
+        const lienzo = document.createElement('canvas');
+        const ctx = lienzo.getContext('2d', { willReadFrequently: true });
+        const paso = () => {
+            if (lector !== activo) return;
+            const { video } = activo;
+            if (video.videoWidth) {
+                const escala = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+                lienzo.width = Math.round(video.videoWidth * escala);
+                lienzo.height = Math.round(video.videoHeight * escala);
+                ctx.drawImage(video, 0, 0, lienzo.width, lienzo.height);
+                const qr = window.jsQR(ctx.getImageData(0, 0, lienzo.width, lienzo.height).data, lienzo.width, lienzo.height,
+                    { inversionAttempts: 'dontInvert' });
+                if (qr && qr.data) validarEntrada(qr.data);
+            }
+            setTimeout(paso, 120);
+        };
+        paso();
+    }
+
     async function apagarCamara() {
         if (!lector) return;
-        const l = lector;
+        lector.stream.getTracks().forEach(t => t.stop());
         lector = null;
-        try { await l.stop(); l.clear(); } catch (_) { /* ya estaba apagada */ }
+        $('lector').replaceChildren();
         $('btnCamara').textContent = 'Encender cámara';
     }
 
