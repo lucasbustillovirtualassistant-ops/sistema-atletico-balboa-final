@@ -214,6 +214,13 @@ details.plegable[open] summary { margin-bottom: 12px; }
 .codigo-manual { margin-top: 12px; }
 .codigo-manual input { text-transform: uppercase; letter-spacing: 0.05em; }
 
+/* Equipos rivales */
+.equipos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+.equipo { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 8px; border: 1px solid var(--borde); border-radius: 8px; text-align: center; font-size: 0.9rem; font-weight: 600; }
+.equipo img { width: 56px; height: 56px; object-fit: contain; }
+.equipo .sin-escudo { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 50%; background: var(--fondo); color: var(--texto-suave); font-size: 0.7rem; font-weight: normal; }
+.equipo button { width: auto; }
+
 /* Recibo de pago: mismo formato que el del club ("Cancelación de sueldo y bonos") */
 .recibo { font-size: 0.92rem; padding: 0 24px; }
 .recibo-banda { display: flex; align-items: center; gap: 14px; background: var(--rojo); color: white; padding: 10px 16px; border-bottom: 3px solid var(--dorado); }

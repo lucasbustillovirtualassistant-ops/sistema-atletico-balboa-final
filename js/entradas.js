@@ -1,5 +1,5 @@
 // Página pública de compra de entradas (sin login).
-// DEMOSTRACIÓN: los partidos y precios vienen de la base real (RPC partidos_en_venta, que solo
+// DEMOSTRACIÓN: los partidos y precios vienen de la base real (RPC cartelera, que solo
 // expone lo que sale en un afiche), pero el pago es simulado y los códigos se inventan aquí,
 // así que no existen en la base y la puerta los rechaza. En la versión real las entradas las
 // crea el servidor solo cuando la pasarela confirma el pago.
@@ -43,6 +43,14 @@
 
     const codigoVisible = (c) => `${c.slice(0, 5)}-${c.slice(5)}`;
 
+    // Los dos escudos, el del club y el del rival (si ya lo subieron en Boletería).
+    function escudos(p) {
+        const rival = p.escudo
+            ? `<img src="${escapar(db.storage.from('escudos').getPublicUrl(p.escudo).data.publicUrl)}" alt="Escudo de ${escapar(p.rival)}">`
+            : '';
+        return `<div class="escudos"><img src="img/logo.jpg" alt="Escudo del Atlético Balboa">${rival ? '<span>vs</span>' + rival : ''}</div>`;
+    }
+
     function codigoDemo() {
         const bytes = crypto.getRandomValues(new Uint8Array(10));
         return Array.from(bytes, (b) => ALFABETO[b % ALFABETO.length]).join('');
@@ -67,7 +75,7 @@
 
     // ---- Paso 1: partidos ----
     async function cargarPartidos() {
-        const { data, error } = await db.rpc('partidos_en_venta');
+        const { data, error } = await db.rpc('cartelera');
         const lista = $('listaPartidos');
         if (error) {
             lista.innerHTML = '<p class="error">No se pudieron cargar los partidos. Revisa tu conexión e inténtalo otra vez.</p>';
@@ -81,6 +89,7 @@
         lista.innerHTML = partidos.map((p) => {
             const desde = Math.min(...p.localidades.map((l) => Number(l.precio)));
             return `<button type="button" class="partido" data-partido="${p.id}">
+                ${p.escudo ? escudos(p) : ''}
                 <div class="torneo">${escapar(p.torneo || 'Partido')}</div>
                 <div class="rival">Atlético Balboa vs ${escapar(p.rival)}</div>
                 <div>${escapar(cuando(p))}</div>
@@ -201,6 +210,7 @@
         $('boletos').innerHTML = boletos.map((b, i) => `<div class="boleto">
             <div class="boleto-banda">Atlético Balboa · Entrada ${i + 1} de ${boletos.length}</div>
             <div class="boleto-cuerpo">
+                ${partido.escudo ? escudos(partido) : ''}
                 <div class="rival">vs ${escapar(partido.rival)}</div>
                 <div class="cuando">${escapar(cuando(partido))}</div>
                 <div class="localidad-boleto">${escapar(b.localidad)}</div>

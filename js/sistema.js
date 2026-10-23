@@ -1781,8 +1781,122 @@
         abrirPartido(id);
     });
 
+    // ---- Equipos rivales (escudos para talonarios y página de compra) ----
+    let equipos = [];
+    let equipoEditando = null;
+    const urlEscudo = (ruta) => db.storage.from('escudos').getPublicUrl(ruta).data.publicUrl;
+
+    async function cargarEquipos() {
+        const { data, error } = await db.from('equipos').select('id, nombre, escudo').order('nombre');
+        if (error) {
+            avisar($('equipoMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        equipos = data;
+        $('listaEquipos').innerHTML = equipos.map(e => `<option value="${escapar(e.nombre)}">`).join('');
+        $('equipos').innerHTML = equipos.length ? equipos.map(e => `
+            <div class="equipo">
+                ${e.escudo ? `<img src="${escapar(urlEscudo(e.escudo))}" alt="">` : '<span class="sin-escudo">Sin escudo</span>'}
+                <span>${escapar(e.nombre)}</span>
+                <button type="button" class="btn-chico secundario" data-editar-equipo="${e.id}">Editar</button>
+            </div>`).join('')
+            : '<p class="ayuda">Todavía no hay equipos. Agrega los rivales de la liga con su escudo.</p>';
+    }
+
+    // El escudo se guarda en PNG de máximo 400 px: pesa poco y conserva el fondo transparente.
+    async function prepararEscudo(archivo) {
+        const imagen = await createImageBitmap(archivo);
+        const escala = Math.min(1, 400 / Math.max(imagen.width, imagen.height));
+        const lienzo = document.createElement('canvas');
+        lienzo.width = Math.round(imagen.width * escala);
+        lienzo.height = Math.round(imagen.height * escala);
+        lienzo.getContext('2d').drawImage(imagen, 0, 0, lienzo.width, lienzo.height);
+        return new Promise(listo => lienzo.toBlob(listo, 'image/png'));
+    }
+
+    function reiniciarEquipoForm() {
+        equipoEditando = null;
+        $('equipoForm').reset();
+        $('btnEquipo').textContent = 'Guardar equipo';
+        $('btnEquipoCancelar').hidden = true;
+    }
+
+    $('equipos').addEventListener('click', (e) => {
+        const id = Number(e.target.dataset.editarEquipo);
+        const equipo = equipos.find(x => x.id === id);
+        if (!equipo) return;
+        equipoEditando = id;
+        $('eqNombre').value = equipo.nombre;
+        $('btnEquipo').textContent = 'Guardar cambios';
+        $('btnEquipoCancelar').hidden = false;
+        $('eqNombre').focus();
+    });
+    $('btnEquipoCancelar').addEventListener('click', reiniciarEquipoForm);
+
+    $('equipoForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const aviso = $('equipoMensaje');
+        const archivo = $('eqEscudo').files[0];
+        $('btnEquipo').disabled = true;
+        let ruta = null;
+        if (archivo) {
+            let png;
+            try {
+                png = await prepararEscudo(archivo);
+            } catch (_) {
+                png = null;
+            }
+            if (!png) {
+                $('btnEquipo').disabled = false;
+                avisar(aviso, 'No se pudo leer la imagen. Prueba con un PNG o JPG.', 'error');
+                return;
+            }
+            ruta = `${crypto.randomUUID()}.png`;
+            const subida = await db.storage.from('escudos').upload(ruta, png, { contentType: 'image/png' });
+            if (subida.error) {
+                $('btnEquipo').disabled = false;
+                avisar(aviso, 'No se pudo subir el escudo: ' + subida.error.message, 'error');
+                return;
+            }
+        }
+        const { error } = await db.rpc('guardar_equipo', { p_id: equipoEditando, p_nombre: $('eqNombre').value, p_escudo: ruta });
+        $('btnEquipo').disabled = false;
+        if (error) {
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        }
+        avisar(aviso, 'Equipo guardado.', 'ok');
+        reiniciarEquipoForm();
+        await cargarEquipos();
+    });
+
+    // Escudo del rival de un partido, listo para el PDF (o null si no tiene o no se puede usar).
+    async function escudoRival(partidoId) {
+        const { data } = await db.from('partidos').select('equipos(escudo)').eq('id', partidoId).maybeSingle();
+        const ruta = data?.equipos?.escudo;
+        return ruta ? pngParaPdf(urlEscudo(ruta)) : null;
+    }
+
+    // Se le pasan al PDF los bytes del PNG tal cual: así no depende de cómo el navegador redibuja la imagen.
+    async function pngParaPdf(url) {
+        try {
+            const respuesta = await fetch(url);
+            if (!respuesta.ok) return null;
+            const blob = await respuesta.blob();
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            const img = await cargarImagen(URL.createObjectURL(blob));
+            // prueba en un PDF aparte: si el PNG no le sirve a la librería, el talonario sale sin él
+            new window.jspdf.jsPDF().addImage(bytes, 'PNG', 0, 0, 10, 10);
+            return { bytes, ancho: img.naturalWidth, alto: img.naturalHeight };
+        } catch (err) {
+            console.warn('Una imagen no se pudo usar en el PDF:', url, err);
+            return null;
+        }
+    }
+
     async function cargarBoleteria() {
         $('liqFecha').value = $('liqFecha').value || hoy();
+        cargarEquipos();
         const { data, error } = await db.rpc('partidos_boleteria');
         if (error) {
             avisar($('partidosMensaje'), 'Error: ' + error.message, 'error');
@@ -2074,6 +2188,21 @@
         } catch (_) {
             // sin escudo la entrada sigue siendo válida
         }
+        const [rival, liga] = await Promise.all([escudoRival(partido.id), pngParaPdf('img/liga.png')]);
+        // logo de la liga (blanco) en la franja roja, a la derecha
+        const ALTO_LIGA = 5.4, anchoLiga = liga ? ALTO_LIGA * liga.ancho / liga.alto : 0;
+        // el escudo del rival puede no ser cuadrado: se ajusta dentro de un cuadro de 12 mm
+        const LADO = 12;
+        const escalaRival = rival ? LADO / Math.max(rival.ancho, rival.alto) : 0;
+        const anchoRival = rival ? rival.ancho * escalaRival : 0, altoRival = rival ? rival.alto * escalaRival : 0;
+        // nombre debajo de cada escudo, en una línea: se achica la letra hasta que quepa
+        const nombreBajo = (texto, centro, y) => {
+            doc.setFont('helvetica', 'bold');
+            let tamano = 6.5;
+            doc.setFontSize(tamano);
+            while (doc.getTextWidth(texto) > 19 && tamano > 5) doc.setFontSize(tamano -= 0.25);
+            doc.text(doc.splitTextToSize(texto, 19)[0], centro, y, { align: 'center' });
+        };
         const MARGEN = 8, COLS = 2, FILAS = 5;
         const W = (215.9 - MARGEN * 2) / COLS, H = (279.4 - MARGEN * 2) / FILAS;
         const dia = new Date(partido.fecha + 'T12:00:00').toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -2094,14 +2223,32 @@
             doc.setFillColor(201, 162, 63).rect(x + 2, y + 9.5, W - 4, 0.8, 'F');
             doc.setTextColor(255).setFont('helvetica', 'bold').setFontSize(8.5);
             doc.text(CLUB.toUpperCase(), x + 5, y + 7);
+            if (liga) doc.addImage(liga.bytes, 'PNG', x + W - 4.5 - anchoLiga, y + 3.05, anchoLiga, ALTO_LIGA, 'liga');
 
-            if (escudo) doc.addImage(escudo, 'JPEG', x + 4, y + 13, 15, 15, 'escudo');
-            const xt = escudo ? x + 22 : x + 5;
-            doc.setTextColor(0).setFontSize(10.5);
-            doc.text(doc.splitTextToSize(`vs ${partido.rival}`, 40).slice(0, 2), xt, y + 17);
-            doc.setFont('helvetica', 'normal').setFontSize(7);
-            doc.text(doc.splitTextToSize(cuando, 42).slice(0, 2), xt, y + 26);
-            if (partido.torneo) doc.text(doc.splitTextToSize(partido.torneo, 42)[0], xt, y + 30.5);
+            doc.setTextColor(0);
+            if (rival) {
+                // los dos escudos con su nombre debajo y "VS" en medio; la fecha abajo a todo lo ancho
+                const centroClub = x + 12, centroRival = x + 34;
+                if (escudo) doc.addImage(escudo, 'JPEG', centroClub - LADO / 2, y + 12.5, LADO, LADO, 'escudo');
+                doc.addImage(rival.bytes, 'PNG', centroRival - anchoRival / 2, y + 12.5 + (LADO - altoRival) / 2,
+                    anchoRival, altoRival, 'rival');
+                doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(227, 6, 19);
+                doc.text('VS', x + 23, y + 20, { align: 'center' });
+                doc.setTextColor(0);
+                nombreBajo('ATLÉTICO BALBOA', centroClub, y + 27.3);
+                nombreBajo(partido.rival.toUpperCase(), centroRival, y + 27.3);
+                doc.setFont('helvetica', 'normal').setFontSize(7);
+                doc.text(doc.splitTextToSize(cuando, 56)[0], x + 5, y + 31);
+                if (partido.torneo) doc.text(doc.splitTextToSize(partido.torneo, 56)[0], x + 5, y + 34.3);
+            } else {
+                const xt = escudo ? x + 22 : x + 5;
+                if (escudo) doc.addImage(escudo, 'JPEG', x + 4, y + 13, 15, 15, 'escudo');
+                doc.setFontSize(10.5);
+                doc.text(doc.splitTextToSize(`vs ${partido.rival}`, 40).slice(0, 2), xt, y + 17);
+                doc.setFont('helvetica', 'normal').setFontSize(7);
+                doc.text(doc.splitTextToSize(cuando, 42).slice(0, 2), xt, y + 26);
+                if (partido.torneo) doc.text(doc.splitTextToSize(partido.torneo, 42)[0], xt, y + 30.5);
+            }
 
             doc.setFont('helvetica', 'bold').setFontSize(13).setTextColor(227, 6, 19);
             doc.text(doc.splitTextToSize(localidad.nombre.toUpperCase(), 56)[0], x + 5, y + 40);
