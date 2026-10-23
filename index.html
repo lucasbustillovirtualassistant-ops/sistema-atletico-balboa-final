@@ -317,6 +317,25 @@
                         Vendidas = impresas − devueltas. Se registra un ingreso en "Taquilla" con la hoja de liquidación adjunta.
                         Si "Entraron" es mayor que "Vendidas", entraron personas con entradas que no se cobraron.</p>
                     <p id="liquidarMensaje" class="mensaje" role="status"></p>
+                    <div class="barra-acciones">
+                        <button type="button" class="secundario" id="btnBoletos" aria-expanded="false">Ver boletos</button>
+                    </div>
+                    <div id="boletosBloque" hidden>
+                        <div class="filtros">
+                            <label>Mostrar <select id="boletosFiltro">
+                                <option value="">Todos</option>
+                                <option value="si">Entraron</option>
+                                <option value="no">No entraron</option>
+                            </select></label>
+                        </div>
+                        <p class="ayuda" id="boletosResumen"></p>
+                        <div class="tabla-scroll">
+                            <table class="tabla">
+                                <thead><tr><th>Localidad</th><th class="num">N.º</th><th>Entró</th><th>Escaneó</th></tr></thead>
+                                <tbody id="boletos"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="solo-gestion" id="talonariosBloque">

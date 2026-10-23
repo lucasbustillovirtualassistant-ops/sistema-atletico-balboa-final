@@ -1952,7 +1952,45 @@
         }
         localidadesPartido = resumen.data;
         pintarDetallePartido(lotes.data);
+        boletosPartido = null;
+        $('boletosBloque').hidden = true;
+        $('btnBoletos').textContent = 'Ver boletos';
+        $('btnBoletos').setAttribute('aria-expanded', 'false');
         $('partidoDetalle').hidden = false;
+    }
+
+    // Boleto por boleto: si entró, a qué hora y quién lo escaneó (sin el código, para que no se pueda copiar)
+    let boletosPartido = null;
+    $('btnBoletos').addEventListener('click', async () => {
+        const abrir = $('boletosBloque').hidden;
+        $('boletosBloque').hidden = !abrir;
+        $('btnBoletos').textContent = abrir ? 'Ocultar boletos' : 'Ver boletos';
+        $('btnBoletos').setAttribute('aria-expanded', String(abrir));
+        if (!abrir) return;
+        $('boletos').innerHTML = '<tr><td colspan="4">Cargando...</td></tr>';
+        const { data, error } = await db.rpc('boletos_partido', { p_partido_id: partidoActual.id });
+        if (error) {
+            $('boletos').innerHTML = `<tr><td colspan="4">Error: ${escapar(error.message)}</td></tr>`;
+            return;
+        }
+        boletosPartido = data;
+        pintarBoletos();
+    });
+    $('boletosFiltro').addEventListener('change', pintarBoletos);
+
+    function pintarBoletos() {
+        if (!boletosPartido) return;
+        const filtro = $('boletosFiltro').value;
+        const lista = boletosPartido.filter(b => !filtro || (filtro === 'si') === Boolean(b.usada_en));
+        const entraron = boletosPartido.filter(b => b.usada_en).length;
+        $('boletosResumen').textContent = `${boletosPartido.length} boletos: ${entraron} entraron, ${boletosPartido.length - entraron} no entraron.`;
+        $('boletos').innerHTML = lista.length ? lista.map(b => `
+            <tr>
+                <td>${escapar(b.localidad)}${b.canal !== 'taquilla' ? ` <small class="detalle">${escapar(b.canal)}</small>` : ''}</td>
+                <td class="num">${b.numero}</td>
+                <td>${b.usada_en ? new Date(b.usada_en).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '<span class="detalle">No entró</span>'}</td>
+                <td class="registro">${b.usada_email ? escapar(b.usada_email) : ''}</td>
+            </tr>`).join('') : '<tr><td colspan="4">No hay boletos para mostrar.</td></tr>';
     }
 
     function pintarDetallePartido(lotes) {
