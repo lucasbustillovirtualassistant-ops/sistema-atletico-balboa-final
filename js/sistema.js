@@ -2127,7 +2127,19 @@
         await cargarBoleteria();
     });
 
-    // ---- Talonarios: 10 entradas por hoja carta, cada una con su QR ----
+    // ---- Talonarios: en impresora térmica (una por ticket) o 10 por hoja carta, cada una con su QR ----
+    // la impresora elegida se recuerda en este navegador
+    const recordarFormato = () => {
+        try {
+            const guardado = localStorage.getItem('formatoTalonario');
+            if (guardado) $('taFormato').value = guardado;
+        } catch (_) { /* sin almacenamiento queda la térmica de 80 mm */ }
+    };
+    recordarFormato();
+    $('taFormato').addEventListener('change', () => {
+        try { localStorage.setItem('formatoTalonario', $('taFormato').value); } catch (_) { /* no importa */ }
+    });
+
     $('talonarioForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const aviso = $('talonarioMensaje');
@@ -2149,6 +2161,7 @@
         await abrirTalonario(ventana, localidad, data, aviso);
         $('btnTalonario').disabled = false;
         $('talonarioForm').reset();
+        recordarFormato();
         await cargarBoleteria();
     });
 
@@ -2219,6 +2232,8 @@
 
     async function pdfTalonario(partido, localidad, entradas) {
         await Promise.all([cargarLibreriaPdf(), cargarLibreriaQr()]);
+        const formato = $('taFormato').value;
+        if (formato !== 'carta') return pdfTermico(partido, localidad, entradas, Number(formato));
         const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'letter' });
         let escudo = null;
         try {
@@ -2303,6 +2318,90 @@
 
             doc.setFont('helvetica', 'normal').setFontSize(5.5).setTextColor(110);
             doc.text('Válida para una persona y una sola entrada. No se aceptan copias.', x + 5, y + H - 2.5);
+        });
+        return doc.output('blob');
+    }
+
+    // Impresora térmica: una entrada por página del tamaño del ticket, así la impresora corta entre una y otra.
+    // Se diseña para 80 mm (72 mm imprimibles) y en 58 mm (48 mm) todo se escala. Solo negro: la térmica no imprime color.
+    async function pdfTermico(partido, localidad, entradas, papel) {
+        const M = papel === 58 ? 5 : 4, k = (papel - M * 2) / 72;
+        const ALTO = 76 * k;
+        const doc = new window.jspdf.jsPDF({ unit: 'mm', format: [papel, ALTO], orientation: papel > ALTO ? 'landscape' : 'portrait' });
+        const X = (d) => M + d * k, Y = (d) => d * k;
+        const letra = (pt) => doc.setFontSize(Math.max(pt * k, 5));
+        // achica la letra hasta que el texto quepa en el ancho (en mm del diseño de 80)
+        const ajustar = (texto, pt, ancho) => {
+            letra(pt);
+            while (doc.getTextWidth(texto) > ancho * k && pt * k > 5) letra(pt -= 0.25);
+            return doc.splitTextToSize(texto, ancho * k)[0];
+        };
+        // ¿cabe con la letra más chica que se permite?
+        const cabe = (texto, ancho) => doc.setFontSize(5).getTextWidth(texto) <= ancho * k;
+
+        let escudo = null;
+        try {
+            escudo = await cargarImagen('img/logo.jpg');
+        } catch (_) {
+            // sin escudo la entrada sigue siendo válida
+        }
+        const [rival, liga] = await Promise.all([escudoRival(partido.id), pngParaPdf('img/liga.png')]);
+        const ALTO_LIGA = 4.8, anchoLiga = liga ? ALTO_LIGA * liga.ancho / liga.alto : 0;
+        const LADO = 13;
+        const escalaRival = rival ? LADO / Math.max(rival.ancho, rival.alto) : 0;
+        const anchoRival = rival ? rival.ancho * escalaRival : 0, altoRival = rival ? rival.alto * escalaRival : 0;
+        const dia = new Date(partido.fecha + 'T12:00:00').toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' });
+        const cuando = [dia, horaCorta(partido.hora)].filter(Boolean).join(' · ');
+
+        entradas.forEach((e, i) => {
+            if (i) doc.addPage([papel, ALTO], papel > ALTO ? 'landscape' : 'portrait');
+            doc.setTextColor(0);
+
+            // franja negra con el nombre del club y el logo de la liga (blanco)
+            doc.setFillColor(0).rect(X(0), Y(2), 72 * k, 7 * k, 'F');
+            doc.setTextColor(255).setFont('helvetica', 'bold');
+            // en 58 mm el nombre completo no cabe: va abreviado
+            const espacio = 72 - 6 - (liga ? anchoLiga + 2 : 0);
+            doc.text(ajustar(cabe(CLUB.toUpperCase(), espacio) ? CLUB.toUpperCase() : 'C.D. ATLÉTICO BALBOA', 8.5, espacio), X(3), Y(6.9));
+            if (liga) doc.addImage(liga.bytes, 'PNG', X(72 - 2.5 - anchoLiga), Y(3.1), anchoLiga * k, ALTO_LIGA * k, 'liga');
+            doc.setTextColor(0);
+
+            if (rival) {
+                if (escudo) doc.addImage(escudo, 'JPEG', X(18 - LADO / 2), Y(11), LADO * k, LADO * k, 'escudo');
+                doc.addImage(rival.bytes, 'PNG', X(54 - anchoRival / 2), Y(11 + (LADO - altoRival) / 2),
+                    anchoRival * k, altoRival * k, 'rival');
+                doc.setFont('helvetica', 'bold');
+                letra(11);
+                doc.text('VS', X(36), Y(19), { align: 'center' });
+                doc.text(ajustar('ATLÉTICO BALBOA', 7, 32), X(18), Y(27.5), { align: 'center' });
+                doc.text(ajustar(partido.rival.toUpperCase(), 7, 32), X(54), Y(27.5), { align: 'center' });
+            } else {
+                if (escudo) doc.addImage(escudo, 'JPEG', X(4), Y(11), LADO * k, LADO * k, 'escudo');
+                doc.setFont('helvetica', 'bold');
+                doc.text(ajustar(`vs ${partido.rival}`, 11, 50), X(22), Y(19.5));
+            }
+            doc.setFont('helvetica', 'normal');
+            doc.text(ajustar(cuando, 7.5, 72), X(36), Y(31.8), { align: 'center' });
+            if (partido.torneo) doc.text(ajustar(partido.torneo, 7, 72), X(36), Y(35.2), { align: 'center' });
+            doc.setDrawColor(0).setLineWidth(0.3).line(X(0), Y(37.5), X(72), Y(37.5));
+
+            // datos de la entrada a la izquierda y el QR a la derecha
+            doc.setFont('helvetica', 'bold');
+            doc.text(ajustar(localidad.nombre.toUpperCase(), 14, 38), X(0), Y(45));
+            letra(14);
+            doc.text(dinero(localidad.precio), X(0), Y(52));
+            doc.setFont('helvetica', 'normal');
+            letra(9);
+            doc.text(`N.º ${String(e.numero).padStart(4, '0')}`, X(0), Y(57.5));
+            doc.setFont('courier', 'bold');
+            letra(9.5);
+            doc.text(codigoVisible(e.codigo), X(0), Y(63.5));
+            dibujarQr(doc, e.codigo, X(42), Y(39.5), 30 * k);
+
+            doc.setFont('helvetica', 'normal');
+            const aviso = 'Válida para una persona y una sola entrada. No se aceptan copias.';
+            doc.text(ajustar(cabe(aviso, 72) ? aviso : 'Una sola entrada por persona. No se aceptan copias.', 5.5, 72),
+                X(36), Y(73.5), { align: 'center' });
         });
         return doc.output('blob');
     }

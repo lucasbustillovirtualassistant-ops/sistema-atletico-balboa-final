@@ -344,10 +344,18 @@
                         <div class="filtros">
                             <label>Localidad <select id="taLocalidad" required></select></label>
                             <label>Cantidad de entradas <input type="number" id="taCantidad" min="1" max="1000" step="1" required></label>
+                            <label>Impresora
+                                <select id="taFormato">
+                                    <option value="80">Térmica 80 mm (corte automático)</option>
+                                    <option value="58">Térmica 58 mm (corte automático)</option>
+                                    <option value="carta">Hoja carta (10 por hoja, para cortar)</option>
+                                </select>
+                            </label>
                             <button type="submit" id="btnTalonario">Generar e imprimir</button>
                         </div>
-                        <p class="ayuda">Salen 10 entradas por hoja carta, numeradas y cada una con su código QR. Cada entrada sirve una sola vez y solo el día del partido.
-                            Si después hacen falta más, genera otro talonario: la numeración continúa.</p>
+                        <p class="ayuda">Cada entrada va numerada y con su código QR, sirve una sola vez y solo el día del partido.
+                            En la térmica sale una entrada por página y la impresora corta entre una y otra: al imprimir el PDF elige la impresora térmica, tamaño real (100 %) y sin márgenes.
+                            "Reimprimir" usa la impresora elegida aquí. Si después hacen falta más, genera otro talonario: la numeración continúa.</p>
                         <p id="talonarioMensaje" class="mensaje" role="status"></p>
                         <div class="tabla-scroll">
                             <table class="tabla">
