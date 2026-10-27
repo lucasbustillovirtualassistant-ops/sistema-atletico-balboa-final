@@ -1628,7 +1628,11 @@
     async function cargarInventario() {
         $('vFecha').value = $('vFecha').value || hoy();
         $('esFecha').value = $('esFecha').value || hoy();
-        $('tituloInvMovimientos').textContent = puede('secretaria') ? 'Mis ventas registradas' : 'Movimientos de inventario';
+        // La secretaria registra entradas de mercadería, pero las salidas son del dueño o el gerente
+        $('tituloInvMovimientos').textContent = puede('secretaria') ? 'Mis ventas y entradas registradas' : 'Movimientos de inventario';
+        $('tituloEntradaSalida').textContent = puede('secretaria') ? 'Entrada de mercadería' : 'Entrada o salida de mercadería';
+        $('esTipo').querySelector('[value="salida"]').disabled = puede('secretaria'); // iPhone no oculta opciones con hidden
+        if (puede('secretaria')) $('esTipo').value = 'entrada';
         const { data, error } = await db.rpc('existencias');
         if (error) {
             avisar($('existenciasMensaje'), 'Error: ' + error.message, 'error');

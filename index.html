@@ -247,14 +247,14 @@
                 <p id="existenciasMensaje" class="mensaje" role="status"></p>
             </div>
 
-            <div class="solo-gestion">
-                <h2>Entrada o salida de mercadería</h2>
+            <div>
+                <h2 id="tituloEntradaSalida">Entrada o salida de mercadería</h2>
                 <form id="entradaSalidaForm" class="tarjeta filtros">
                     <label>Producto <select id="esProducto" required></select></label>
                     <label>Movimiento
                         <select id="esTipo">
                             <option value="entrada">Entrada (compra o existencia inicial)</option>
-                            <option value="salida">Salida (regalo, pérdida, uso del club)</option>
+                            <option value="salida" class="solo-gestion">Salida (regalo, pérdida, uso del club)</option>
                         </select>
                     </label>
                     <label>Cantidad <input type="number" id="esCantidad" min="1" step="1" required></label>
@@ -263,7 +263,7 @@
                     <button type="submit" id="btnEntradaSalida">Registrar</button>
                 </form>
                 <p class="ayuda">La entrada solo suma unidades; lo que se pagó por la mercadería se registra aparte en Movimientos como egreso
-                    ("Compra de mercadería para reventa") con su factura. La salida pide el motivo.</p>
+                    ("Compra de mercadería para reventa") con su factura. <span class="solo-gestion">La salida pide el motivo.</span></p>
                 <p id="entradaSalidaMensaje" class="mensaje" role="status"></p>
             </div>
 
