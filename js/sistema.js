@@ -52,6 +52,10 @@
 
     const puede = (...roles) => perfil && roles.includes(perfil.rol);
 
+    // La misma regla que tiene configurada Supabase Auth: 10 caracteres o más, con letras y números.
+    const REGLA_CLAVE = 'La contraseña debe tener al menos 10 caracteres, con letras y números.';
+    const claveValida = (c) => c.length >= 10 && /[A-Za-z]/.test(c) && /\d/.test(c);
+
     // ---- Inicio de sesión ----
     // Las cuentas se crean desde Supabase (Authentication > Users); el registro público está desactivado.
     const loginForm = $('loginForm');
@@ -3052,8 +3056,12 @@
 
     function generarClave() {
         const letras = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-        const azar = crypto.getRandomValues(new Uint32Array(12));
-        return Array.from(azar, n => letras[n % letras.length]).join('');
+        let clave;
+        do {
+            const azar = crypto.getRandomValues(new Uint32Array(12));
+            clave = Array.from(azar, n => letras[n % letras.length]).join('');
+        } while (!claveValida(clave)); // Supabase exige letras y números
+        return clave;
     }
 
     $('btnGenerarClave').addEventListener('click', () => { $('nuClave').value = generarClave(); });
@@ -3064,6 +3072,10 @@
         const email = $('nuEmail').value.trim();
         const rol = $('nuRol').value;
 
+        if (!claveValida($('nuClave').value)) {
+            avisar(aviso, REGLA_CLAVE + ' Usa el botón Generar.', 'error');
+            return;
+        }
         if (rol === 'dueno' && !confirm(`${email} tendrá control total del sistema, igual que tú. ¿Continuar?`)) return;
 
         $('btnCrearUsuario').disabled = true;
@@ -3174,13 +3186,19 @@
             avisar(aviso, 'Las contraseñas no coinciden.', 'error');
             return;
         }
+        if (!claveValida(nueva)) {
+            avisar(aviso, REGLA_CLAVE, 'error');
+            return;
+        }
 
         $('btnCambiarClave').disabled = true;
         const { error } = await db.auth.updateUser({ password: nueva });
         $('btnCambiarClave').disabled = false;
 
         if (error) {
-            avisar(aviso, 'Error: ' + error.message, 'error');
+            avisar(aviso, error.code === 'weak_password' ? REGLA_CLAVE
+                : error.code === 'same_password' ? 'La nueva contraseña debe ser distinta de la actual.'
+                : 'Error: ' + error.message, 'error');
             return;
         }
         $('claveForm').reset();

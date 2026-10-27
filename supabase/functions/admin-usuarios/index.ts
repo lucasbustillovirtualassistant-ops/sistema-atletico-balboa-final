@@ -52,8 +52,9 @@ Deno.serve(async (req) => {
   }
 
   const password = String(datos.password ?? '');
-  if (password.length < MIN_CLAVE) {
-    return responder(400, { error: `La contraseña debe tener al menos ${MIN_CLAVE} caracteres` });
+  // La misma regla que Supabase Auth: la API de administrador no siempre la aplica.
+  if (password.length < MIN_CLAVE || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    return responder(400, { error: `La contraseña debe tener al menos ${MIN_CLAVE} caracteres, con letras y números` });
   }
 
   // 2) Crear usuario con rol
