@@ -62,6 +62,7 @@
         <a href="#boleteria" data-seccion="boleteria" data-roles="dueno gerente secretaria"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z"/><path d="M14 5v2M14 11v2M14 17v2"/></svg><span>Boletería</span></a>
         <a href="#puerta" data-seccion="puerta" data-roles="dueno gerente secretaria porteria"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M7 12h10"/></svg><span>Puerta</span></a>
         <a href="#planilla" data-seccion="planilla" data-roles="dueno gerente"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3"/></svg><span>Planilla</span></a>
+        <a href="#solicitudes" data-seccion="solicitudes" data-roles="dueno gerente"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span>Solicitudes</span><b class="aviso-num" id="avisoSolicitudes" hidden></b></a>
         <a href="#reportes" data-seccion="reportes" data-roles="dueno gerente"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 17v-3M12 17v-6M16 17v-2"/></svg><span>Reportes</span></a>
         <a href="#ajustes" data-seccion="ajustes" data-roles="dueno"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg><span>Ajustes</span></a>
         <a href="#cuenta" data-seccion="cuenta" data-roles="dueno gerente secretaria porteria"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Mi cuenta</span></a>
@@ -656,9 +657,74 @@
                 <button type="submit" id="btnCambiarClave">Cambiar contraseña</button>
                 <p id="claveMensaje" class="mensaje" role="status"></p>
             </form>
+
+            <div class="solo-gestion">
+                <h2 class="angosto">PIN de autorización</h2>
+                <form id="pinForm" class="tarjeta angosto">
+                    <p class="ayuda">Con este PIN autorizas en persona que la secretaria anule un movimiento suyo de los últimos 7 días.
+                        Es personal: no lo dictes por teléfono; a distancia, aprueba la solicitud en "Solicitudes".</p>
+                    <p><span class="estado" id="pinEstado"></span></p>
+                    <label>PIN nuevo <span class="opcional">(4 a 6 números)</span>
+                        <input type="password" id="pinNuevo" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" autocomplete="off" required>
+                    </label>
+                    <label>Repite el PIN
+                        <input type="password" id="pinRepetir" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" autocomplete="off" required>
+                    </label>
+                    <button type="submit" id="btnGuardarPin">Guardar PIN</button>
+                    <p id="pinMensaje" class="mensaje" role="status"></p>
+                </form>
+            </div>
+        </section>
+
+        <section id="solicitudes" class="seccion">
+            <h2>Solicitudes de anulación</h2>
+            <p class="ayuda">La secretaria pide anular un movimiento que registró por error. Al aprobar, el movimiento queda anulado
+                (no se borra) y deja de contar; si era una venta, la mercadería vuelve sola al inventario.</p>
+            <div id="solicitudesPendientes"></div>
+            <p id="solicitudesMensaje" class="mensaje" role="status"></p>
+
+            <h2>Resueltas recientemente</h2>
+            <div class="tarjeta">
+                <div class="tabla-scroll">
+                    <table class="tabla">
+                        <thead><tr><th>Pedida</th><th>Movimiento</th><th class="num">Monto</th><th>Motivo</th><th>Resultado</th></tr></thead>
+                        <tbody id="solicitudesResueltas"></tbody>
+                    </table>
+                </div>
+            </div>
         </section>
     </main>
     </div>
+
+    <!-- Anular con autorización (secretaria): PIN del jefe en persona, o solicitud a distancia -->
+    <dialog id="dlgAnular" class="dialogo">
+        <form method="dialog" class="dialogo-cerrar"><button class="btn-x" aria-label="Cerrar">×</button></form>
+        <h2>Anular movimiento</h2>
+        <p class="ayuda" id="dlgMovimiento"></p>
+        <label>Motivo
+            <input type="text" id="dlgMotivo" maxlength="200" placeholder="Ej. Se registró dos veces" required>
+        </label>
+
+        <div class="opcion-autoriza">
+            <h3>El jefe está aquí</h3>
+            <div class="filtros">
+                <label>Autoriza <select id="dlgAutoriza"></select></label>
+                <label>PIN <input type="password" id="dlgPin" inputmode="numeric" maxlength="6" autocomplete="off"></label>
+                <button type="button" id="btnAutorizarPin">Autorizar</button>
+            </div>
+            <p class="ayuda-campo" id="dlgSinPin" hidden>Ningún dueño o gerente tiene PIN todavía. Se crea en "Mi cuenta".</p>
+        </div>
+
+        <div class="opcion-autoriza">
+            <h3>El jefe no está</h3>
+            <p class="ayuda-campo">Se le envía la solicitud y la aprueba desde su celular.</p>
+            <div class="barra-acciones">
+                <button type="button" class="secundario" id="btnPedirRemoto">Pedir autorización a distancia</button>
+                <a class="boton-whatsapp" id="lnkWhatsapp" target="_blank" rel="noopener" hidden>Avisar por WhatsApp</a>
+            </div>
+        </div>
+        <p id="dlgMensaje" class="mensaje" role="status"></p>
+    </dialog>
 
     <!-- Aquí se arma la planilla o los recibos justo antes de imprimir -->
     <div id="impresion"></div>

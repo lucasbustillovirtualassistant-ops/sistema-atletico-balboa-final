@@ -140,7 +140,7 @@
         document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('activo', a.dataset.seccion === id));
 
         // En la barra de arriba siempre se ve en qué pantalla se está
-        const nombre = document.querySelector(`.nav a[data-seccion="${id}"]`).textContent.trim();
+        const nombre = document.querySelector(`.nav a[data-seccion="${id}"] span`).textContent.trim();
         $('pantallaActual').textContent = nombre;
         document.title = `${nombre} · Atlético Balboa`;
         abrirMenu(false);
@@ -153,7 +153,12 @@
         if (id !== 'puerta') apagarCamara();
         if (id === 'movimientos') cargarHistorial();
         if (id === 'ajustes') { cargarUsuarios(); pintarCategorias(); pintarAjustesDocumentos(); }
-        if (id === 'cuenta') $('cuentaDatos').textContent = `${perfil.email} · ${ROLES[perfil.rol]}`;
+        if (id === 'cuenta') {
+            $('cuentaDatos').textContent = `${perfil.email} · ${ROLES[perfil.rol]}`;
+            if (puede('dueno', 'gerente')) pintarEstadoPin();
+        }
+        if (id === 'solicitudes') cargarSolicitudes();
+        else actualizarAvisoSolicitudes();
     }
     window.addEventListener('hashchange', mostrarSeccion);
 
@@ -349,6 +354,11 @@
     const historial = $('historial');
     const historialMensaje = $('historialMensaje');
     let adjuntarA = null; // movimiento al que se le agregan comprobantes desde el historial
+    let movimientosVistos = new Map();       // id -> movimiento del historial en pantalla
+    let pendientesPorMovimiento = new Map(); // id del movimiento -> id de su solicitud de anulación pendiente
+    let rechazosPorMovimiento = new Map();   // id del movimiento -> su último rechazo, para que la secretaria lo vea
+    const DIAS_ANULAR = 7; // la secretaria solo puede pedir anular lo que registró en los últimos 7 días (la base lo verifica)
+    const VIA = { pin: 'con PIN, en persona', remota: 'a distancia' };
 
     async function cargarHistorial() {
         avisar(historialMensaje, 'Cargando...');
@@ -356,7 +366,8 @@
         let consulta = db
             .from('transacciones')
             .select('id, fecha, concepto, monto, tipo, categoria_id, proveedor, num_documento, registrado_email, anulada, '
-                + 'anulada_email, anulada_en, motivo_anulacion, planilla_id, comprobantes(id, ruta, nombre), arbitrajes(id)')
+                + 'anulada_email, anulada_en, motivo_anulacion, anulacion_via, anulacion_solicitada_email, planilla_id, created_at, '
+                + 'comprobantes(id, ruta, nombre), arbitrajes(id)')
             .order('fecha', { ascending: false })
             .order('id', { ascending: false })
             .limit(LIMITE_HISTORIAL);
@@ -374,6 +385,18 @@
             console.error('Error al cargar historial:', error);
             avisar(historialMensaje, 'Error: ' + error.message, 'error');
             return;
+        }
+
+        movimientosVistos = new Map(data.map(m => [m.id, m]));
+        pendientesPorMovimiento = new Map();
+        rechazosPorMovimiento = new Map();
+        if (puede('secretaria')) {
+            const { data: sols } = await db.from('solicitudes_anulacion')
+                .select('id, transaccion_id, estado, resuelta_email, nota_resolucion')
+                .in('estado', ['pendiente', 'rechazada'])
+                .order('solicitada_en', { ascending: true }); // el último rechazo queda encima
+            (sols || []).forEach(s => (s.estado === 'pendiente' ? pendientesPorMovimiento.set(s.transaccion_id, s.id)
+                : rechazosPorMovimiento.set(s.transaccion_id, s)));
         }
 
         pintarTotales(data);
@@ -401,9 +424,14 @@
 
     function filaMovimiento(m) {
         const signo = m.tipo === 'ingreso' ? '+' : '−';
+        const pedido = m.anulacion_solicitada_email
+            ? ` a pedido de ${escapar(m.anulacion_solicitada_email)} (${VIA[m.anulacion_via] || ''})` : '';
+        const rechazo = rechazosPorMovimiento.get(m.id);
         const anulacion = m.anulada
-            ? `<div class="nota">Anulado por ${escapar(m.anulada_email)} el ${fechaCorta(m.anulada_en.slice(0, 10))}: ${escapar(m.motivo_anulacion)}</div>`
-            : '';
+            ? `<div class="nota">Anulado por ${escapar(m.anulada_email)}${pedido} el ${fechaCorta(m.anulada_en.slice(0, 10))}: ${escapar(m.motivo_anulacion)}</div>`
+            : rechazo && !pendientesPorMovimiento.has(m.id)
+                ? `<div class="nota">Anulación rechazada por ${escapar(rechazo.resuelta_email)}${rechazo.nota_resolucion ? ': ' + escapar(rechazo.nota_resolucion) : ''}</div>`
+                : '';
         const detalle = [m.proveedor, m.num_documento && 'Doc. ' + m.num_documento].filter(Boolean).map(escapar).join(' · ');
 
         const archivos = m.comprobantes.map((c, i) =>
@@ -419,6 +447,12 @@
         let boton = '';
         if (!m.anulada && m.planilla_id) boton = '<span class="nota">Pago de planilla</span>';
         else if (!m.anulada && puede('dueno', 'gerente')) boton = `<button type="button" class="btn-chico" data-anular="${m.id}">Anular</button>`;
+        else if (!m.anulada && pendientesPorMovimiento.has(m.id)) {
+            boton = `<span class="nota">Anulación pedida</span>
+                <button type="button" class="btn-chico secundario" data-cancelar-solicitud="${pendientesPorMovimiento.get(m.id)}">Cancelar</button>`;
+        } else if (!m.anulada && puede('secretaria') && Date.now() - new Date(m.created_at) < DIAS_ANULAR * 864e5) {
+            boton = `<button type="button" class="btn-chico" data-pedir-anular="${m.id}">Anular</button>`;
+        }
         return `
             <tr class="${m.anulada ? 'anulada' : ''}">
                 <td>${fechaCorta(m.fecha)}</td>
@@ -455,6 +489,18 @@
             return;
         }
 
+        if (boton.dataset.pedirAnular) {
+            abrirDialogoAnular(movimientosVistos.get(Number(boton.dataset.pedirAnular)));
+            return;
+        }
+        if (boton.dataset.cancelarSolicitud) {
+            if (!confirm('¿Cancelar la solicitud de anulación?')) return;
+            const { error } = await db.rpc('cancelar_solicitud', { p_id: Number(boton.dataset.cancelarSolicitud) });
+            if (error) avisar(historialMensaje, 'Error: ' + error.message, 'error');
+            cargarHistorial();
+            return;
+        }
+
         const id = boton.dataset.anular;
         if (!id) return;
 
@@ -484,6 +530,189 @@
         await cargarHistorial();
         if (fallidos.length) avisar(historialMensaje, `No se pudieron subir: ${fallidos.join(', ')}.`, 'error');
         else avisar(historialMensaje, 'Comprobantes agregados.', 'ok');
+    });
+
+    // ---- Anular con autorización (secretaria) ----
+    // En persona: el dueño o gerente escribe su PIN. A distancia: queda una solicitud que aprueba desde su sesión.
+    // Las reglas (solo lo suyo, 7 días, intentos del PIN) las aplica la base de datos.
+    const dlgAnular = $('dlgAnular');
+    let anulando = null;
+
+    async function abrirDialogoAnular(m) {
+        if (!m) return;
+        anulando = m;
+        $('dlgMovimiento').textContent =
+            `${fechaCorta(m.fecha)} · ${m.concepto} · ${m.tipo === 'ingreso' ? '+' : '−'}${dinero(m.monto)}`;
+        $('dlgMotivo').value = '';
+        $('dlgPin').value = '';
+        $('lnkWhatsapp').hidden = true;
+        $('btnPedirRemoto').disabled = false;
+        avisar($('dlgMensaje'), '');
+        dlgAnular.showModal();
+        $('dlgMotivo').focus();
+
+        const { data, error } = await db.rpc('autorizadores');
+        const jefes = error ? [] : data;
+        $('dlgAutoriza').innerHTML = jefes
+            .map(j => `<option value="${j.user_id}">${escapar(j.nombre)} · ${ROLES[j.rol]}</option>`).join('');
+        $('dlgSinPin').hidden = jefes.length > 0;
+        $('btnAutorizarPin').disabled = !jefes.length;
+    }
+
+    function motivoAnulacion() {
+        const motivo = $('dlgMotivo').value.trim();
+        if (motivo.length < 5) {
+            avisar($('dlgMensaje'), 'Escribe el motivo (mínimo 5 caracteres).', 'error');
+            $('dlgMotivo').focus();
+            return null;
+        }
+        return motivo;
+    }
+
+    $('btnAutorizarPin').addEventListener('click', async (e) => {
+        const motivo = motivoAnulacion();
+        if (!motivo) return;
+        if (!/^\d{4,6}$/.test($('dlgPin').value)) {
+            avisar($('dlgMensaje'), 'El PIN son de 4 a 6 números.', 'error');
+            $('dlgPin').focus();
+            return;
+        }
+        e.target.disabled = true;
+        const { data: rechazo, error } = await db.rpc('anular_con_pin', {
+            p_id: anulando.id, p_motivo: motivo, p_autoriza: $('dlgAutoriza').value, p_pin: $('dlgPin').value
+        });
+        e.target.disabled = false;
+        $('dlgPin').value = ''; // el PIN no se queda en pantalla
+        if (error || rechazo) {
+            avisar($('dlgMensaje'), error ? 'Error: ' + error.message : rechazo, 'error');
+            return;
+        }
+        dlgAnular.close();
+        avisar(historialMensaje, 'Movimiento anulado con autorización.', 'ok');
+        cargarHistorial();
+    });
+
+    $('btnPedirRemoto').addEventListener('click', async (e) => {
+        const motivo = motivoAnulacion();
+        if (!motivo) return;
+        e.target.disabled = true;
+        const { error } = await db.rpc('solicitar_anulacion', { p_id: anulando.id, p_motivo: motivo });
+        if (error) {
+            e.target.disabled = false;
+            avisar($('dlgMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        const m = anulando;
+        const texto = `Hola, pedí anular un movimiento en el sistema del club:\n${m.concepto} (${dinero(m.monto)}, ${fechaCorta(m.fecha)}).\n`
+            + `Motivo: ${motivo}\nPuedes aprobarlo aquí: ${location.origin}${location.pathname}#solicitudes`;
+        $('lnkWhatsapp').href = 'https://wa.me/?text=' + encodeURIComponent(texto);
+        $('lnkWhatsapp').hidden = false;
+        avisar($('dlgMensaje'), 'Solicitud enviada. Avísale por WhatsApp para que la apruebe.', 'ok');
+        cargarHistorial();
+    });
+
+    // ---- Solicitudes de anulación (dueño y gerente) ----
+    async function actualizarAvisoSolicitudes() {
+        if (!puede('dueno', 'gerente')) return;
+        const { count } = await db.from('solicitudes_anulacion').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente');
+        $('avisoSolicitudes').textContent = count || '';
+        $('avisoSolicitudes').hidden = !count;
+        $('btnMenu').classList.toggle('con-aviso', !!count);
+    }
+    setInterval(actualizarAvisoSolicitudes, 60000);
+
+    const RESULTADO = { aprobada: 'Aprobada', rechazada: 'Rechazada', cancelada: 'Cancelada por quien la pidió' };
+
+    async function cargarSolicitudes() {
+        avisar($('solicitudesMensaje'), 'Cargando...');
+        const { data, error } = await db.from('solicitudes_anulacion')
+            .select('id, motivo, estado, solicitada_email, solicitada_en, resuelta_email, resuelta_en, nota_resolucion, '
+                + 'transaccion:transacciones(fecha, concepto, monto, tipo, categoria_id, registrado_email)')
+            .order('solicitada_en', { ascending: false })
+            .limit(60);
+        if (error) {
+            avisar($('solicitudesMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        const fechaHora = (ts) => new Date(ts).toLocaleString('es', { day: '2-digit', month: '2-digit', hour: 'numeric', minute: '2-digit' });
+        const monto = (t) => `<span class="${t.tipo}">${t.tipo === 'ingreso' ? '+' : '−'}${dinero(t.monto)}</span>`;
+
+        const pendientes = data.filter(s => s.estado === 'pendiente');
+        $('solicitudesPendientes').innerHTML = pendientes.map(s => `
+            <div class="tarjeta solicitud">
+                <div class="solicitud-datos">
+                    <strong>${escapar(s.transaccion.concepto)}</strong> ${monto(s.transaccion)}
+                    <small class="detalle">${fechaCorta(s.transaccion.fecha)} · ${escapar(nombreCategoria(s.transaccion.categoria_id))}
+                        · registrado por ${escapar(s.transaccion.registrado_email)}</small>
+                    <p><b>Motivo:</b> ${escapar(s.motivo)}</p>
+                    <small class="detalle">Pedida por ${escapar(s.solicitada_email)} · ${fechaHora(s.solicitada_en)}</small>
+                </div>
+                <div class="barra-acciones">
+                    <button type="button" data-aprobar="${s.id}">Aprobar y anular</button>
+                    <button type="button" class="secundario" data-rechazar="${s.id}">Rechazar</button>
+                </div>
+            </div>`).join('');
+        avisar($('solicitudesMensaje'), pendientes.length ? '' : 'No hay solicitudes pendientes.');
+
+        $('solicitudesResueltas').innerHTML = data.filter(s => s.estado !== 'pendiente').slice(0, 20).map(s => `
+            <tr>
+                <td>${fechaHora(s.solicitada_en)}<small class="detalle">${escapar(s.solicitada_email || '')}</small></td>
+                <td>${escapar(s.transaccion.concepto)}<small class="detalle">${fechaCorta(s.transaccion.fecha)}</small></td>
+                <td class="num">${monto(s.transaccion)}</td>
+                <td>${escapar(s.motivo)}</td>
+                <td><span class="estado ${s.estado}">${RESULTADO[s.estado]}</span>
+                    <small class="detalle">${escapar([s.resuelta_email, s.nota_resolucion].filter(Boolean).join(' · '))}</small></td>
+            </tr>`).join('') || '<tr><td colspan="5" class="ayuda">Todavía no hay solicitudes resueltas.</td></tr>';
+        actualizarAvisoSolicitudes();
+    }
+
+    $('solicitudesPendientes').addEventListener('click', async (e) => {
+        const boton = e.target.closest('button');
+        if (!boton) return;
+        const aprobar = !!boton.dataset.aprobar;
+        const id = Number(boton.dataset.aprobar || boton.dataset.rechazar);
+        let nota = null;
+        if (aprobar) {
+            if (!confirm('¿Aprobar? El movimiento quedará anulado y dejará de contar en los totales.')) return;
+        } else {
+            nota = prompt('¿Por qué se rechaza? (opcional, lo verá la secretaria)');
+            if (nota === null) return;
+        }
+        boton.disabled = true;
+        const { error } = await db.rpc('resolver_solicitud', { p_id: id, p_aprobar: aprobar, p_nota: nota });
+        if (error) {
+            boton.disabled = false;
+            avisar($('solicitudesMensaje'), 'Error: ' + error.message, 'error');
+            return;
+        }
+        cargarSolicitudes();
+    });
+
+    // ---- PIN de autorización (dueño y gerente, en Mi cuenta) ----
+    async function pintarEstadoPin() {
+        const { data } = await db.rpc('tengo_pin');
+        $('pinEstado').className = 'estado ' + (data ? 'pagada' : 'borrador');
+        $('pinEstado').textContent = data ? 'Ya tienes PIN' : 'Todavía no tienes PIN';
+        $('btnGuardarPin').textContent = data ? 'Cambiar PIN' : 'Guardar PIN';
+    }
+
+    $('pinForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const pin = $('pinNuevo').value;
+        if (pin !== $('pinRepetir').value) {
+            avisar($('pinMensaje'), 'Los PIN no coinciden.', 'error');
+            return;
+        }
+        $('btnGuardarPin').disabled = true;
+        const { error } = await db.rpc('guardar_pin', { p_pin: pin });
+        $('btnGuardarPin').disabled = false;
+        $('pinForm').reset();
+        if (error) {
+            avisar($('pinMensaje'), error.message, 'error');
+            return;
+        }
+        avisar($('pinMensaje'), 'PIN guardado. No se lo compartas a nadie.', 'ok');
+        pintarEstadoPin();
     });
 
     // ---- Dashboard (dueño y gerente) ----
