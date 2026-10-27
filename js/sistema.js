@@ -63,6 +63,10 @@
         $('pantallaLogin').hidden = false;
         $('app').hidden = true;
         $('sesion').hidden = true;
+        $('btnMenu').hidden = true;
+        abrirMenu(false);
+        $('pantallaActual').textContent = 'Control Financiero';
+        document.title = 'Sistema Atlético Balboa';
     }
 
     async function entrarConSesion(session) {
@@ -83,6 +87,7 @@
         $('usuarioEmail').textContent = `${data.nombre || data.email} · ${ROLES[data.rol]}`;
         $('pantallaLogin').hidden = true;
         $('sesion').hidden = false;
+        $('btnMenu').hidden = false;
         $('app').hidden = false;
 
         document.querySelectorAll('.nav a').forEach(a => {
@@ -134,6 +139,13 @@
         document.querySelectorAll('.seccion').forEach(s => s.classList.toggle('activa', s.id === id));
         document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('activo', a.dataset.seccion === id));
 
+        // En la barra de arriba siempre se ve en qué pantalla se está
+        const nombre = document.querySelector(`.nav a[data-seccion="${id}"]`).textContent.trim();
+        $('pantallaActual').textContent = nombre;
+        document.title = `${nombre} · Atlético Balboa`;
+        abrirMenu(false);
+        window.scrollTo(0, 0);
+
         if (id === 'dashboard') cargarDashboard();
         if (id === 'planilla') cargarSeccionPlanilla();
         if (id === 'inventario') cargarInventario();
@@ -144,6 +156,19 @@
         if (id === 'cuenta') $('cuentaDatos').textContent = `${perfil.email} · ${ROLES[perfil.rol]}`;
     }
     window.addEventListener('hashchange', mostrarSeccion);
+
+    // ---- Menú lateral (botón de tres rayas) ----
+    function abrirMenu(abrir) {
+        document.body.classList.toggle('menu-abierto', abrir);
+        $('btnMenu').setAttribute('aria-expanded', abrir);
+        $('btnMenu').setAttribute('aria-label', abrir ? 'Cerrar menú' : 'Abrir menú');
+        if (abrir) document.querySelector('.nav a.activo')?.focus();
+    }
+    $('btnMenu').addEventListener('click', () => abrirMenu(!document.body.classList.contains('menu-abierto')));
+    $('velo').addEventListener('click', () => abrirMenu(false));
+    // si se toca la pantalla en la que ya se está, no cambia el hash: se cierra igual
+    $('menu').addEventListener('click', (e) => { if (e.target.closest('a')) abrirMenu(false); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') abrirMenu(false); });
 
     // ---- Categorías ----
     async function cargarCategorias() {

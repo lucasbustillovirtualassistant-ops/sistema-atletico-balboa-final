@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema Atlético Balboa</title>
     <link rel="icon" type="image/png" href="img/icono.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
     <link rel="stylesheet" href="css/style.css">
 
     <!-- 1) Librería de Supabase (versión fija). Expone window.supabase -->
@@ -14,9 +17,12 @@
 </head>
 <body>
     <header class="topbar">
+        <button type="button" id="btnMenu" class="btn-menu" aria-label="Abrir menú" aria-controls="menu" aria-expanded="false" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
         <div class="marca">
             <img src="img/logo.jpg" alt="Escudo del Club Atlético Balboa">
-            <h1>Atlético Balboa <span>Control Financiero</span></h1>
+            <h1>Atlético Balboa <span id="pantallaActual">Control Financiero</span></h1>
         </div>
         <div id="sesion" class="sesion" hidden>
             <span id="usuarioEmail"></span>
@@ -43,16 +49,22 @@
     <!-- Aplicación: visible solo con sesión iniciada y rol asignado.
          data-roles indica qué roles ven cada sección. -->
     <div id="app" hidden>
-    <nav class="nav">
-        <a href="#dashboard" data-seccion="dashboard" data-roles="dueno gerente">Dashboard</a>
-        <a href="#movimientos" data-seccion="movimientos" data-roles="dueno gerente secretaria">Movimientos</a>
-        <a href="#inventario" data-seccion="inventario" data-roles="dueno gerente secretaria">Inventario</a>
-        <a href="#boleteria" data-seccion="boleteria" data-roles="dueno gerente secretaria">Boletería</a>
-        <a href="#puerta" data-seccion="puerta" data-roles="dueno gerente secretaria porteria">Puerta</a>
-        <a href="#planilla" data-seccion="planilla" data-roles="dueno gerente">Planilla</a>
-        <a href="#reportes" data-seccion="reportes" data-roles="dueno gerente">Reportes</a>
-        <a href="#ajustes" data-seccion="ajustes" data-roles="dueno">Ajustes</a>
-        <a href="#cuenta" data-seccion="cuenta" data-roles="dueno gerente secretaria porteria">Mi cuenta</a>
+    <!-- Menú lateral: se abre con el botón de tres rayas y se cierra al elegir una pantalla -->
+    <div id="velo" class="velo"></div>
+    <nav class="nav" id="menu" aria-label="Pantallas">
+        <div class="nav-cabecera">
+            <img src="img/logo.jpg" alt="">
+            <div><strong>Atlético Balboa</strong><small>Control Financiero</small></div>
+        </div>
+        <a href="#dashboard" data-seccion="dashboard" data-roles="dueno gerente"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Dashboard</span></a>
+        <a href="#movimientos" data-seccion="movimientos" data-roles="dueno gerente secretaria"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4"/></svg><span>Movimientos</span></a>
+        <a href="#inventario" data-seccion="inventario" data-roles="dueno gerente secretaria"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/></svg><span>Inventario</span></a>
+        <a href="#boleteria" data-seccion="boleteria" data-roles="dueno gerente secretaria"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4z"/><path d="M14 5v2M14 11v2M14 17v2"/></svg><span>Boletería</span></a>
+        <a href="#puerta" data-seccion="puerta" data-roles="dueno gerente secretaria porteria"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M7 12h10"/></svg><span>Puerta</span></a>
+        <a href="#planilla" data-seccion="planilla" data-roles="dueno gerente"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3"/></svg><span>Planilla</span></a>
+        <a href="#reportes" data-seccion="reportes" data-roles="dueno gerente"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 17v-3M12 17v-6M16 17v-2"/></svg><span>Reportes</span></a>
+        <a href="#ajustes" data-seccion="ajustes" data-roles="dueno"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg><span>Ajustes</span></a>
+        <a href="#cuenta" data-seccion="cuenta" data-roles="dueno gerente secretaria porteria"><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Mi cuenta</span></a>
     </nav>
 
     <main>
