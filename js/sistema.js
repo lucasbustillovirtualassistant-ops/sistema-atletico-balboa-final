@@ -1639,6 +1639,10 @@
             return;
         }
         productos = data;
+        // Quién creó y quién cambió cada producto (lo registra la base al guardar)
+        const { data: autores } = await db.from('productos')
+            .select('id, creado_email, created_at, modificado_email, modificado_en');
+        (autores || []).forEach(a => Object.assign(productos.find(p => p.id === a.id) || {}, a));
         pintarVenta();
         pintarExistencias();
         cargarMovimientosInventario();
@@ -1840,6 +1844,8 @@
         $('esProducto').innerHTML = productos.filter(p => p.activo)
             .map(p => `<option value="${p.id}">${escapar(nombreProducto(p))} (quedan ${p.existencia})</option>`).join('');
 
+        const registro = (p) => `<td class="registro">${p.creado_email ? `Creó ${escapar(p.creado_email)}<br>${fechaCorta(p.created_at.slice(0, 10))}` : '—'}${
+            p.modificado_email ? `<small class="detalle">Cambió ${escapar(p.modificado_email)} el ${fechaCorta(p.modificado_en.slice(0, 10))}</small>` : ''}</td>`;
         $('existencias').innerHTML = productos.length
             ? productos.map(p => gestion ? `
                 <tr data-producto="${p.id}" class="${p.activo ? '' : 'anulada'}">
@@ -1848,15 +1854,16 @@
                     <td><input type="text" class="pr-talla" value="${escapar(p.talla)}" maxlength="20"></td>
                     <td><input type="number" class="pr-precio" value="${Number(p.precio)}" min="0.01" step="0.01"></td>
                     <td class="num"><strong>${p.existencia}</strong></td>
+                    ${registro(p)}
                     <td><select class="pr-categoria">${opcionesCategoria(p.categoria_id)}</select></td>
                     <td><input type="checkbox" class="pr-activo" ${p.activo ? 'checked' : ''}></td>
                     <td><button type="button" class="btn-chico" data-guardar>Guardar</button></td>
                 </tr>` : `
                 <tr class="${p.activo ? '' : 'anulada'}">
                     <td>${escapar(p.nombre)}</td><td>${escapar(p.color)}</td><td>${escapar(p.talla)}</td>
-                    <td class="num">${dinero(p.precio)}</td><td class="num"><strong>${p.existencia}</strong></td>
+                    <td class="num">${dinero(p.precio)}</td><td class="num"><strong>${p.existencia}</strong></td>${registro(p)}
                 </tr>`).join('')
-            : `<tr><td colspan="8" class="ayuda">Todavía no hay productos.${gestion ? ' Agrégalos con el formulario de arriba.' : ''}</td></tr>`;
+            : `<tr><td colspan="9" class="ayuda">Todavía no hay productos. Agrégalos con el formulario de arriba.</td></tr>`;
     }
 
     $('productoForm').addEventListener('submit', async (e) => {
