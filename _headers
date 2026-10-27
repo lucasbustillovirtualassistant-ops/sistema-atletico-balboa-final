@@ -1,8 +1,11 @@
 # Cabeceras de seguridad para Cloudflare Pages.
 # noindex: mientras sea de prueba, que Google no lo muestre en búsquedas.
+# CSP: solo corre código del sitio y de los dos CDN de las librerías (cada una con su hash de integridad).
 /*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(self), microphone=(), geolocation=()
   X-Robots-Tag: noindex
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://hcxyxcfipnqdgpppbqed.supabase.co; connect-src 'self' https://hcxyxcfipnqdgpppbqed.supabase.co wss://hcxyxcfipnqdgpppbqed.supabase.co; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

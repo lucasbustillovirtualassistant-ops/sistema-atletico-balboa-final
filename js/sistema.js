@@ -614,10 +614,14 @@
     // ---- Solicitudes de anulación (dueño y gerente) ----
     async function actualizarAvisoSolicitudes() {
         if (!puede('dueno', 'gerente')) return;
-        const { count } = await db.from('solicitudes_anulacion').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente');
+        const [{ count }, { data: pin }] = await Promise.all([
+            db.from('solicitudes_anulacion').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente'),
+            db.rpc('estado_pin')
+        ]);
         $('avisoSolicitudes').textContent = count || '';
         $('avisoSolicitudes').hidden = !count;
-        $('btnMenu').classList.toggle('con-aviso', !!count);
+        $('avisoPin').hidden = !pin?.desactivado_en;
+        $('btnMenu').classList.toggle('con-aviso', !!count || !!pin?.desactivado_en);
     }
     setInterval(actualizarAvisoSolicitudes, 60000);
 
@@ -690,10 +694,22 @@
 
     // ---- PIN de autorización (dueño y gerente, en Mi cuenta) ----
     async function pintarEstadoPin() {
-        const { data } = await db.rpc('tengo_pin');
-        $('pinEstado').className = 'estado ' + (data ? 'pagada' : 'borrador');
-        $('pinEstado').textContent = data ? 'Ya tienes PIN' : 'Todavía no tienes PIN';
-        $('btnGuardarPin').textContent = data ? 'Cambiar PIN' : 'Guardar PIN';
+        const { data: pin } = await db.rpc('estado_pin');
+        const tiene = pin?.tiene;
+        const desactivado = tiene && pin.desactivado_en;
+        $('pinEstado').className = 'estado ' + (desactivado ? 'rechazada' : tiene ? 'pagada' : 'borrador');
+        $('pinEstado').textContent = desactivado ? 'PIN desactivado' : tiene ? 'Ya tienes PIN' : 'Todavía no tienes PIN';
+        $('btnGuardarPin').textContent = tiene ? 'Cambiar PIN' : 'Guardar PIN';
+        // Intentos fallidos de los últimos 7 días: si no fuiste tú quien se equivocó, alguien intentó adivinarlo.
+        const alerta = desactivado
+            ? `Tu PIN se desactivó el ${new Date(pin.desactivado_en).toLocaleString('es')} tras 10 intentos fallidos `
+              + `desde la cuenta de ${pin.desactivado_email}. Crea uno nuevo, distinto al anterior.`
+            : pin?.fallidos
+                ? `Hubo ${pin.fallidos} intento${pin.fallidos === 1 ? '' : 's'} fallido${pin.fallidos === 1 ? '' : 's'} `
+                  + `con tu PIN en los últimos 7 días (${pin.fallidos_emails}). Si te parece raro, cámbialo.`
+                : '';
+        $('pinAlerta').textContent = alerta;
+        $('pinAlerta').hidden = !alerta;
     }
 
     $('pinForm').addEventListener('submit', async (e) => {
@@ -713,6 +729,7 @@
         }
         avisar($('pinMensaje'), 'PIN guardado. No se lo compartas a nadie.', 'ok');
         pintarEstadoPin();
+        actualizarAvisoSolicitudes();
     });
 
     // ---- Dashboard (dueño y gerente) ----
@@ -968,6 +985,8 @@
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
             s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+            s.integrity = 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw';
+            s.crossOrigin = 'anonymous';
             s.onload = resolve;
             s.onerror = () => reject(new Error('No se pudo descargar la librería de Excel. Revisa tu conexión.'));
             document.head.appendChild(s);
@@ -1733,6 +1752,8 @@
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
             s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+            s.integrity = 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk';
+            s.crossOrigin = 'anonymous';
             s.onload = resolve;
             s.onerror = () => reject(new Error('No se pudo descargar la librería de PDF. Revisa tu conexión.'));
             document.head.appendChild(s);
@@ -2468,6 +2489,8 @@
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
             s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+            s.integrity = 'sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1';
+            s.crossOrigin = 'anonymous';
             s.onload = resolve;
             s.onerror = () => reject(new Error('No se pudo descargar la librería de QR. Revisa tu conexión.'));
             document.head.appendChild(s);
@@ -2749,6 +2772,8 @@
         return new Promise((resolve, reject) => {
             const s = document.createElement('script');
             s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+            s.integrity = 'sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx';
+            s.crossOrigin = 'anonymous';
             s.onload = resolve;
             s.onerror = () => reject(new Error('No se pudo descargar el lector de QR. Revisa tu conexión.'));
             document.head.appendChild(s);
