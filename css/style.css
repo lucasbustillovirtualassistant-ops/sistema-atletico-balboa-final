@@ -275,13 +275,13 @@ details.plegable[open] summary { margin-bottom: 12px; }
 @media (max-width: 560px) { .arbitro { grid-template-columns: 1fr 1fr; } .arbitros-titulos { display: none; } }
 
 /* Boletería */
-.localidad-fila { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 6px; align-items: center; margin-bottom: 8px; }
+.localidad-fila { display: grid; grid-template-columns: 2fr 1fr 1fr 4.5rem auto; gap: 6px; align-items: center; margin-bottom: 8px; }
 .localidad-fila input { margin: 0; }
+.localidad-fila .l-tribuna { justify-self: center; width: 20px; height: 20px; }
 .localidad-titulos { font-size: 0.75rem; font-weight: 600; color: var(--texto-suave); margin-bottom: 4px; }
 .estado.cancelado { background: var(--borde); color: var(--texto-suave); }
 .estado.hoy { background: var(--rojo); color: white; }
 #partidoTitulo .estado { vertical-align: middle; margin-left: 6px; }
-.tabla td input.l-devueltas { min-width: 80px; width: 90px; margin-left: auto; text-align: right; }
 
 /* Puerta: resultado grande para leerlo de lejos */
 .lector { width: 100%; border-radius: var(--radio); overflow: hidden; background: var(--negro); }
@@ -294,6 +294,7 @@ details.plegable[open] summary { margin-bottom: 12px; }
 .resultado-entrada.no { background: var(--rojo-egreso); }
 .resultado-entrada.aviso { background: #b45309; }
 .codigo-manual { margin-top: 12px; }
+#devueltasBloque h3 { margin: 18px 0 8px; font-size: 1rem; }
 .codigo-manual input { text-transform: uppercase; letter-spacing: 0.05em; }
 
 /* Equipos rivales */

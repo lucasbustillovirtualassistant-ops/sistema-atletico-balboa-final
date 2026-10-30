@@ -290,7 +290,7 @@
                         <datalist id="listaEquipos"></datalist>
                         <label>Torneo <input type="text" id="paTorneo" maxlength="80" placeholder="Opcional"></label>
                     </div>
-                    <div class="localidad-fila localidad-titulos"><span>Localidad</span><span>Precio</span><span>Cupo <span class="opcional">(opcional)</span></span><span></span></div>
+                    <div class="localidad-fila localidad-titulos"><span>Localidad</span><span>Precio</span><span>Cupo <span class="opcional">(opcional)</span></span><span>Control tribuna</span><span></span></div>
                     <div id="paLocalidades"></div>
                     <div class="barra-acciones">
                         <button type="button" class="secundario" id="btnAgregarLocalidad">Agregar localidad</button>
@@ -318,7 +318,7 @@
                     <div class="tabla-scroll">
                         <table class="tabla">
                             <thead><tr><th>Localidad</th><th class="num">Precio</th><th class="num">Impresas</th><th class="num">Entraron</th>
-                                <th class="num">Devueltas sin vender</th><th class="num">Vendidas</th><th class="num">Importe</th></tr></thead>
+                                <th class="num">Devueltas</th><th class="num">Vendidas</th><th class="num">Importe</th></tr></thead>
                             <tbody id="localidades"></tbody>
                         </table>
                     </div>
@@ -326,7 +326,7 @@
                         <label>Fecha del ingreso <input type="date" id="liqFecha" required></label>
                         <button type="button" id="btnLiquidar">Liquidar taquilla</button>
                     </div>
-                    <p class="ayuda" id="liquidarAyuda">Al terminar el partido, cuenta las entradas que regresaron sin vender y escríbelas en cada localidad.
+                    <p class="ayuda" id="liquidarAyuda">Antes de liquidar, marca abajo en "Entradas devueltas" las que regresaron sin vender: la columna Devueltas se llena sola.
                         Vendidas = impresas − devueltas. Se registra un ingreso en "Taquilla" con la hoja de liquidación adjunta.
                         Si "Entraron" es mayor que "Vendidas", entraron personas con entradas que no se cobraron.</p>
                     <p id="liquidarMensaje" class="mensaje" role="status"></p>
@@ -339,15 +339,51 @@
                                 <option value="">Todos</option>
                                 <option value="si">Entraron</option>
                                 <option value="no">No entraron</option>
+                                <option value="devuelta">Devueltas</option>
+                                <option value="reingreso">Con reingresos a tribuna</option>
                             </select></label>
                         </div>
                         <p class="ayuda" id="boletosResumen"></p>
                         <div class="tabla-scroll">
                             <table class="tabla">
-                                <thead><tr><th>Localidad</th><th class="num">N.º</th><th>Entró</th><th>Escaneó</th></tr></thead>
+                                <thead><tr><th>Localidad</th><th class="num">N.º</th><th>Portones</th><th>Tribuna</th><th>Registro</th></tr></thead>
                                 <tbody id="boletos"></tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+
+                <div id="devueltasBloque">
+                    <h2>Entradas devueltas</h2>
+                    <div class="tarjeta">
+                        <div class="filtros">
+                            <label>Acción <select id="deAccion">
+                                <option value="marcar">Marcar como devueltas</option>
+                                <option value="quitar">Quitar devueltas (se marcaron por error)</option>
+                            </select></label>
+                        </div>
+                        <h3>Escaneando una por una</h3>
+                        <div id="lectorDevueltas" class="lector"></div>
+                        <div id="resultadoDevuelta" class="resultado-entrada" role="status" aria-live="polite" hidden></div>
+                        <div class="barra-acciones">
+                            <button type="button" id="btnCamaraDevueltas">Encender cámara</button>
+                        </div>
+                        <form id="devueltaCodigoForm" class="con-boton codigo-manual">
+                            <input type="text" id="deCodigo" maxlength="20" autocomplete="off" autocapitalize="characters"
+                                   placeholder="O escribe el código: ABCDE-FGHJK" aria-label="Código de la entrada devuelta" required>
+                            <button type="submit" class="btn-chico">Aplicar</button>
+                        </form>
+                        <h3>Por números</h3>
+                        <form id="devueltasRangoForm" class="filtros">
+                            <label>Localidad <select id="deLocalidad" required></select></label>
+                            <label>Del N.º <input type="number" id="deDesde" min="1" step="1" required></label>
+                            <label>Al N.º <input type="number" id="deHasta" min="1" step="1" required></label>
+                            <button type="submit" id="btnDevueltasRango">Aplicar</button>
+                        </form>
+                        <p id="devueltasMensaje" class="mensaje" role="status"></p>
+                        <p class="ayuda">Una entrada devuelta ya no sirve en la puerta: si alguien la presenta, sale en rojo "entrada devuelta".
+                            Las que ya entraron no se pueden marcar como devueltas. Se guarda quién marcó cada una y a qué hora.
+                            Se pueden quitar mientras no se liquide la taquilla.</p>
                     </div>
                 </div>
 
@@ -404,6 +440,12 @@
             <div class="angosto">
                 <h2>Control de entradas</h2>
                 <div class="tarjeta">
+                    <div class="filtros">
+                        <label>Estoy en <select id="puertaControl">
+                            <option value="portones">Portones (entrada general)</option>
+                            <option value="tribuna">Puerta de tribuna</option>
+                        </select></label>
+                    </div>
                     <div id="lector" class="lector"></div>
                     <div id="resultadoEntrada" class="resultado-entrada" role="status" aria-live="assertive" hidden></div>
                     <div class="barra-acciones">
@@ -416,7 +458,9 @@
                     </form>
                     <p class="ayuda" id="contadorPuerta"></p>
                     <p class="ayuda">Apunta la cámara al código QR de la entrada. Verde: puede pasar. Rojo: no pasa
-                        (ya se usó, es de otro día o no es del club). Rompe o marca cada entrada que pase.</p>
+                        (ya se usó, fue devuelta, es de otro día o no es del club). En los portones, rompe o marca cada entrada General que pase; la de tribuna solo márcala sin dañar el QR, porque se vuelve a escanear en la puerta de tribuna.</p>
+                    <p class="ayuda">En la puerta de tribuna solo pasan las entradas de tribuna que ya se escanearon en los portones.
+                        Naranja: es un reingreso (ya había entrado a tribuna); dice cuántas veces y hace cuánto fue la última. Si una entrada vuelve a los pocos minutos, puede ser que se la pasaron a otro.</p>
                 </div>
             </div>
         </section>

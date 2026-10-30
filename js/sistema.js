@@ -154,7 +154,7 @@
         if (id === 'planilla') cargarSeccionPlanilla();
         if (id === 'inventario') cargarInventario();
         if (id === 'boleteria') cargarBoleteria();
-        if (id !== 'puerta') apagarCamara();
+        apagarCamara();
         if (id === 'movimientos') cargarHistorial();
         if (id === 'ajustes') { cargarUsuarios(); pintarCategorias(); pintarAjustesDocumentos(); }
         if (id === 'cuenta') {
@@ -2018,7 +2018,8 @@
     let partidos = [];
     let partidoActual = null;  // fila de partidos_boleteria
     let localidadesPartido = []; // filas de resumen_partido
-    const LOCALIDADES_BASE = [{ nombre: 'General', precio: 7 }, { nombre: 'Tribuna poniente', precio: 12 }];
+    // tribuna: además de los portones, se revisa otra vez en la puerta de tribuna
+    const LOCALIDADES_BASE = [{ nombre: 'General', precio: 7 }, { nombre: 'Tribuna poniente', precio: 12, tribuna: true }];
     const horaCorta = (h) => (h ? h.slice(0, 5) : '');
 
     function filaLocalidad(l = {}) {
@@ -2028,6 +2029,7 @@
             <input type="text" class="l-nombre" maxlength="40" value="${escapar(l.nombre || '')}" aria-label="Localidad" required>
             <input type="number" class="l-precio" min="0.01" step="0.01" value="${l.precio || ''}" aria-label="Precio" required>
             <input type="number" class="l-cupo" min="1" step="1" aria-label="Cupo">
+            <input type="checkbox" class="l-tribuna" ${l.tribuna ? 'checked' : ''} aria-label="Pasa por el control de tribuna">
             <button type="button" class="btn-chico secundario" data-quitar>Quitar</button>`;
         $('paLocalidades').appendChild(fila);
     }
@@ -2050,7 +2052,8 @@
         const localidades = Array.from($('paLocalidades').children).map(f => ({
             nombre: f.querySelector('.l-nombre').value.trim(),
             precio: Number(f.querySelector('.l-precio').value),
-            cupo: f.querySelector('.l-cupo').value || null
+            cupo: f.querySelector('.l-cupo').value || null,
+            tribuna: f.querySelector('.l-tribuna').checked
         }));
         $('btnCrearPartido').disabled = true;
         const { data: id, error } = await db.rpc('crear_partido', {
@@ -2226,6 +2229,11 @@
     });
 
     async function abrirPartido(id) {
+        if (partidoActual?.id !== id) {
+            apagarCamara(); // las devueltas que se escanean son del partido abierto
+            $('resultadoDevuelta').hidden = true;
+            avisar($('devueltasMensaje'), '');
+        }
         partidoActual = partidos.find(p => p.id === id) || null;
         if (!partidoActual) {
             $('partidoDetalle').hidden = true;
@@ -2257,10 +2265,10 @@
         $('btnBoletos').textContent = abrir ? 'Ocultar boletos' : 'Ver boletos';
         $('btnBoletos').setAttribute('aria-expanded', String(abrir));
         if (!abrir) return;
-        $('boletos').innerHTML = '<tr><td colspan="4">Cargando...</td></tr>';
-        const { data, error } = await db.rpc('boletos_partido', { p_partido_id: partidoActual.id });
+        $('boletos').innerHTML = '<tr><td colspan="5">Cargando...</td></tr>';
+        const { data, error } = await db.rpc('detalle_boletos', { p_partido_id: partidoActual.id });
         if (error) {
-            $('boletos').innerHTML = `<tr><td colspan="4">Error: ${escapar(error.message)}</td></tr>`;
+            $('boletos').innerHTML = `<tr><td colspan="5">Error: ${escapar(error.message)}</td></tr>`;
             return;
         }
         boletosPartido = data;
@@ -2268,19 +2276,37 @@
     });
     $('boletosFiltro').addEventListener('change', pintarBoletos);
 
+    const FILTROS_BOLETOS = {
+        si: b => b.usada_en,
+        no: b => !b.usada_en && !b.devuelta_en,
+        devuelta: b => b.devuelta_en,
+        reingreso: b => b.tribuna_ingresos > 1
+    };
+
     function pintarBoletos() {
         if (!boletosPartido) return;
-        const filtro = $('boletosFiltro').value;
-        const lista = boletosPartido.filter(b => !filtro || (filtro === 'si') === Boolean(b.usada_en));
-        const entraron = boletosPartido.filter(b => b.usada_en).length;
-        $('boletosResumen').textContent = `${boletosPartido.length} boletos: ${entraron} entraron, ${boletosPartido.length - entraron} no entraron.`;
+        const filtro = FILTROS_BOLETOS[$('boletosFiltro').value];
+        const lista = filtro ? boletosPartido.filter(filtro) : boletosPartido;
+        const cuantos = (f) => boletosPartido.filter(f).length;
+        const tribuna = cuantos(b => b.tribuna_en);
+        $('boletosResumen').textContent = `${boletosPartido.length} boletos: ${cuantos(FILTROS_BOLETOS.si)} entraron, `
+            + `${cuantos(FILTROS_BOLETOS.devuelta)} devueltas, ${cuantos(FILTROS_BOLETOS.no)} no entraron.`
+            + (boletosPartido.some(b => b.control_tribuna)
+                ? ` A tribuna entraron ${tribuna}; ${cuantos(FILTROS_BOLETOS.reingreso)} con reingresos.` : '');
+        const fechaHora = (t) => new Date(t).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' });
+        const hora = (t) => new Date(t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
         $('boletos').innerHTML = lista.length ? lista.map(b => `
             <tr>
                 <td>${escapar(b.localidad)}${b.canal !== 'taquilla' ? ` <small class="detalle">${escapar(b.canal)}</small>` : ''}</td>
                 <td class="num">${b.numero}</td>
-                <td>${b.usada_en ? new Date(b.usada_en).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '<span class="detalle">No entró</span>'}</td>
-                <td class="registro">${b.usada_email ? escapar(b.usada_email) : ''}</td>
-            </tr>`).join('') : '<tr><td colspan="4">No hay boletos para mostrar.</td></tr>';
+                <td>${b.usada_en ? fechaHora(b.usada_en)
+                    : b.devuelta_en ? `<span class="estado cancelado">Devuelta</span> <small class="detalle">${fechaHora(b.devuelta_en)}</small>`
+                    : '<span class="detalle">No entró</span>'}</td>
+                <td>${!b.control_tribuna ? '' : b.tribuna_en
+                    ? `${hora(b.tribuna_en)}${b.tribuna_ingresos > 1 ? ` <small class="detalle">${b.tribuna_ingresos} ingresos, último ${hora(b.tribuna_ultima)}</small>` : ''}`
+                    : '<span class="detalle">No entró</span>'}</td>
+                <td class="registro">${escapar(b.usada_email || b.devuelta_email || '')}</td>
+            </tr>`).join('') : '<tr><td colspan="5">No hay boletos para mostrar.</td></tr>';
     }
 
     function pintarDetallePartido(lotes) {
@@ -2290,22 +2316,14 @@
         $('partidoTitulo').innerHTML = `vs ${escapar(p.rival)} · ${fechaCorta(p.fecha)} ${horaCorta(p.hora)}
             <span class="estado ${clase}">${texto}</span>`;
 
-        $('localidades').innerHTML = localidadesPartido.map(l => `
-            <tr data-localidad="${l.localidad_id}" data-precio="${l.precio}" data-impresas="${l.impresas}">
-                <td>${escapar(l.nombre)}${l.cupo ? `<small class="detalle">cupo ${l.cupo}</small>` : ''}</td>
-                <td class="num">${dinero(l.precio)}</td>
-                <td class="num">${l.impresas}</td>
-                <td class="num">${l.escaneadas}</td>
-                <td class="num">${abierto
-                    ? `<input type="number" class="l-devueltas" min="0" max="${l.impresas}" step="1" placeholder="0" aria-label="Devueltas de ${escapar(l.nombre)}">`
-                    : (l.devueltas ?? '—')}</td>
-                <td class="num l-vendidas">${l.vendidas ?? ''}</td>
-                <td class="num l-importe">${l.vendidas != null ? dinero(l.vendidas * l.precio) : ''}</td>
-            </tr>`).join('') + '<tr class="total"><td colspan="5">Total</td><td class="num" id="liqVendidas"></td><td class="num" id="liqTotal"></td></tr>';
-        calcularLiquidacion();
+        pintarLocalidades();
 
         $('liquidarAcciones').hidden = !abierto;
         $('liquidarAyuda').hidden = !abierto;
+        $('devueltasBloque').hidden = !abierto;
+        if (!abierto && lector?.boton === 'btnCamaraDevueltas') apagarCamara();
+        $('deLocalidad').innerHTML = localidadesPartido
+            .map(l => `<option value="${l.localidad_id}">${escapar(l.nombre)}</option>`).join('');
         avisar($('liquidarMensaje'), p.liquidado
             ? 'Taquilla liquidada: el ingreso y la hoja de liquidación están en Movimientos.'
             : p.cancelado ? 'Partido cancelado: sus entradas ya no sirven en la puerta.' : '');
@@ -2324,48 +2342,62 @@
             </tr>`).join('') : '<tr><td colspan="5">Todavía no se ha impreso ningún talonario.</td></tr>';
     }
 
-    // Vendidas = impresas - devueltas, por localidad
+    // Vendidas = impresas - devueltas (las devueltas son las marcadas en "Entradas devueltas")
     function lineasLiquidacion() {
-        return Array.from($('localidades').querySelectorAll('tr[data-localidad]')).map(f => {
-            const impresas = Number(f.dataset.impresas);
-            const campo = f.querySelector('.l-devueltas');
-            const devueltas = campo ? Number(campo.value || 0) : 0;
-            return { fila: f, localidad_id: Number(f.dataset.localidad), precio: Number(f.dataset.precio), impresas, devueltas, vendidas: impresas - devueltas };
-        });
+        return localidadesPartido.map(l => ({
+            localidad_id: l.localidad_id, nombre: l.nombre, precio: Number(l.precio), impresas: l.impresas,
+            devueltas: l.devueltas, vendidas: l.impresas - l.devueltas, escaneadas: l.escaneadas
+        }));
     }
 
-    function calcularLiquidacion() {
-        if (partidoActual.cancelado || partidoActual.liquidado) {
-            const total = localidadesPartido.reduce((s, l) => s + (l.vendidas || 0) * l.precio, 0);
-            $('liqVendidas').textContent = localidadesPartido.reduce((s, l) => s + (l.vendidas || 0), 0);
-            $('liqTotal').textContent = dinero(total);
-            return;
-        }
-        let vendidas = 0, total = 0;
-        for (const l of lineasLiquidacion()) {
-            vendidas += l.vendidas;
-            total += l.vendidas * l.precio;
-            l.fila.querySelector('.l-vendidas').textContent = l.vendidas;
-            l.fila.querySelector('.l-importe').textContent = dinero(l.vendidas * l.precio);
-        }
-        $('liqVendidas').textContent = vendidas;
-        $('liqTotal').textContent = dinero(total);
+    function pintarLocalidades() {
+        const abierto = !partidoActual.cancelado && !partidoActual.liquidado;
+        let totalVendidas = 0, total = 0;
+        $('localidades').innerHTML = localidadesPartido.map(l => {
+            const vendidas = l.vendidas ?? (abierto ? l.impresas - l.devueltas : null);
+            if (vendidas != null) {
+                totalVendidas += vendidas;
+                total += vendidas * l.precio;
+            }
+            return `
+            <tr>
+                <td>${escapar(l.nombre)}${l.cupo ? `<small class="detalle">cupo ${l.cupo}</small>` : ''}</td>
+                <td class="num">${dinero(l.precio)}</td>
+                <td class="num">${l.impresas}</td>
+                <td class="num">${l.escaneadas}</td>
+                <td class="num">${l.devueltas ?? '—'}</td>
+                <td class="num">${vendidas ?? ''}</td>
+                <td class="num">${vendidas != null ? dinero(vendidas * l.precio) : ''}</td>
+            </tr>`;
+        }).join('') + `<tr class="total"><td colspan="5">Total</td><td class="num">${totalVendidas}</td><td class="num">${dinero(total)}</td></tr>`;
     }
-    $('localidades').addEventListener('input', calcularLiquidacion);
+
+    // Después de marcar devueltas: solo se vuelve a pedir el resumen, sin cerrar la lista de boletos
+    async function refrescarLocalidades() {
+        const { data, error } = await db.rpc('resumen_partido', { p_partido_id: partidoActual.id });
+        if (error) return;
+        localidadesPartido = data;
+        pintarLocalidades();
+        if (boletosPartido) {
+            const r = await db.rpc('detalle_boletos', { p_partido_id: partidoActual.id });
+            if (!r.error) {
+                boletosPartido = r.data;
+                pintarBoletos();
+            }
+        }
+    }
 
     $('btnLiquidar').addEventListener('click', async () => {
         const aviso = $('liquidarMensaje');
-        const lineas = lineasLiquidacion();
-        if (lineas.some(l => !Number.isInteger(l.devueltas) || l.devueltas < 0 || l.vendidas < 0)) {
-            avisar(aviso, 'Las devueltas deben ser números enteros y no más que las impresas.', 'error');
-            return;
-        }
-        const total = lineas.reduce((s, l) => s + l.vendidas * l.precio, 0);
+        let lineas = lineasLiquidacion();
+        let total = lineas.reduce((s, l) => s + l.vendidas * l.precio, 0);
         if (!total) {
             avisar(aviso, 'No hay entradas vendidas que liquidar.', 'error');
             return;
         }
-        if (!confirm(`Se registrará un ingreso de ${dinero(total)} en Taquilla. ¿Continuar?`)) return;
+        const devueltas = lineas.reduce((s, l) => s + l.devueltas, 0);
+        if (!confirm(`Se registrará un ingreso de ${dinero(total)} en Taquilla (${devueltas} entradas devueltas). ` +
+            'Después ya no se podrán marcar más devueltas. ¿Continuar?')) return;
 
         const ventana = window.open('', '_blank'); // se abre ya, si no el navegador la bloquea
         $('btnLiquidar').disabled = true;
@@ -2373,7 +2405,7 @@
         const { data: tx, error } = await db.rpc('liquidar_taquilla', {
             p_partido_id: partidoActual.id,
             p_fecha: $('liqFecha').value,
-            p_devueltas: lineas.map(({ localidad_id, devueltas }) => ({ localidad_id, devueltas }))
+            p_devueltas: [] // la base cuenta las devueltas marcadas
         });
         $('btnLiquidar').disabled = false;
         if (error) {
@@ -2381,14 +2413,18 @@
             avisar(aviso, 'Error: ' + error.message, 'error');
             return;
         }
+        // la hoja sale con lo que guardó la base (otro celular pudo marcar devueltas mientras tanto)
+        const guardado = await db.rpc('resumen_partido', { p_partido_id: partidoActual.id });
+        if (!guardado.error) {
+            localidadesPartido = guardado.data;
+            lineas = lineasLiquidacion();
+            total = lineas.reduce((s, l) => s + l.vendidas * l.precio, 0);
+        }
 
         let resultado = `Taquilla liquidada: ingreso de ${dinero(total)} registrado.`;
         let problema = false;
         try {
-            const pdf = await hojaLiquidacion(tx, partidoActual, lineas.map(l => ({
-                ...l, nombre: localidadesPartido.find(x => x.localidad_id === l.localidad_id).nombre,
-                escaneadas: localidadesPartido.find(x => x.localidad_id === l.localidad_id).escaneadas
-            })), total);
+            const pdf = await hojaLiquidacion(tx, partidoActual, lineas, total);
             const fallidos = await subirComprobantes(tx, [new File([pdf], `liquidacion-taquilla-${tx}.pdf`, { type: 'application/pdf' })]);
             if (fallidos.length) {
                 problema = true;
@@ -2766,10 +2802,11 @@
     // ---- Puerta: validar entradas con la cámara del celular ----
     // Lector propio (cámara + jsQR) en vez de una librería que arma el video por su cuenta:
     // en iPhone el video tiene que llevar playsinline y muted, si no la cámara se enciende pero no se ve.
-    let lector = null;          // { stream, video } mientras la cámara está encendida
-    let validando = false;
+    // La misma cámara sirve en Puerta y para escanear devueltas en Boletería.
+    let lector = null;          // { stream, video, boton, alLeer } mientras la cámara está encendida
+    let leyendo = false;
     let ultimoCodigo = '', ultimoEn = 0;
-    let dejoPasar = 0;
+    let dejoPasar = 0, reingresos = 0;
 
     function cargarLibreriaLector() {
         if (window.jsQR) return Promise.resolve();
@@ -2784,8 +2821,9 @@
         });
     }
 
-    async function encenderCamara() {
-        $('btnCamara').disabled = true;
+    async function encenderCamara(contenedor, boton, caja, alLeer) {
+        apagarCamara();
+        $(boton).disabled = true;
         let stream = null;
         try {
             await cargarLibreriaLector();
@@ -2794,19 +2832,33 @@
             video.setAttribute('playsinline', '');
             video.muted = true;
             video.srcObject = stream;
-            $('lector').replaceChildren(video);
+            $(contenedor).replaceChildren(video);
             await video.play();
-            lector = { stream, video };
-            $('btnCamara').textContent = 'Apagar cámara';
+            lector = { stream, video, contenedor, boton, alLeer };
+            $(boton).textContent = 'Apagar cámara';
             leerCuadros(lector);
         } catch (err) {
             console.error('Error al encender la cámara:', err);
             if (stream) stream.getTracks().forEach(t => t.stop());
-            $('lector').replaceChildren();
+            $(contenedor).replaceChildren();
             lector = null;
-            mostrarResultado('aviso', 'No se pudo encender la cámara', 'Da permiso de cámara al navegador, o escribe el código a mano.');
+            mostrarResultado('aviso', 'No se pudo encender la cámara', 'Da permiso de cámara al navegador, o escribe el código a mano.', caja);
         }
-        $('btnCamara').disabled = false;
+        $(boton).disabled = false;
+    }
+
+    // Normaliza el código y evita leer el mismo QR varias veces seguidas (la cámara lo ve varias veces por segundo)
+    async function codigoLeido(texto, manual, accion) {
+        const codigo = String(texto).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (leyendo || (!manual && codigo === ultimoCodigo && Date.now() - ultimoEn < 4000)) return;
+        leyendo = true;
+        ultimoCodigo = codigo;
+        try {
+            await accion(codigo);
+        } finally {
+            ultimoEn = Date.now();
+            leyendo = false;
+        }
     }
 
     // Unas 8 veces por segundo copia el cuadro del video (achicado) y busca un QR.
@@ -2823,27 +2875,41 @@
                 ctx.drawImage(video, 0, 0, lienzo.width, lienzo.height);
                 const qr = window.jsQR(ctx.getImageData(0, 0, lienzo.width, lienzo.height).data, lienzo.width, lienzo.height,
                     { inversionAttempts: 'dontInvert' });
-                if (qr && qr.data) validarEntrada(qr.data);
+                if (qr && qr.data) activo.alLeer(qr.data);
             }
             setTimeout(paso, 120);
         };
         paso();
     }
 
-    async function apagarCamara() {
+    function apagarCamara() {
         if (!lector) return;
         lector.stream.getTracks().forEach(t => t.stop());
+        $(lector.contenedor).replaceChildren();
+        $(lector.boton).textContent = 'Encender cámara';
         lector = null;
-        $('lector').replaceChildren();
-        $('btnCamara').textContent = 'Encender cámara';
     }
 
-    $('btnCamara').addEventListener('click', () => (lector ? apagarCamara() : encenderCamara()));
+    $('btnCamara').addEventListener('click', () => (lector?.boton === 'btnCamara' ? apagarCamara()
+        : encenderCamara('lector', 'btnCamara', 'resultadoEntrada', (t) => validarEntrada(t))));
 
     $('codigoForm').addEventListener('submit', (e) => {
         e.preventDefault();
         validarEntrada($('codigoManual').value, true);
         $('codigoManual').value = '';
+    });
+
+    // Portones o puerta de tribuna: cada celular recuerda dónde está
+    try {
+        const guardado = localStorage.getItem('controlPuerta');
+        if (guardado) $('puertaControl').value = guardado;
+    } catch (_) { /* queda en portones */ }
+    $('puertaControl').addEventListener('change', () => {
+        try { localStorage.setItem('controlPuerta', $('puertaControl').value); } catch (_) { /* no importa */ }
+        dejoPasar = 0;
+        reingresos = 0;
+        $('contadorPuerta').textContent = '';
+        $('resultadoEntrada').hidden = true;
     });
 
     // Pitido corto: agudo si pasa, grave si no (en la puerta hay ruido y no siempre se ve la pantalla).
@@ -2860,38 +2926,56 @@
         if (navigator.vibrate) navigator.vibrate(bien ? 100 : [200, 100, 200]);
     }
 
-    function mostrarResultado(clase, titulo, detalle) {
-        const caja = $('resultadoEntrada');
+    function mostrarResultado(clase, titulo, detalle, id = 'resultadoEntrada') {
+        const caja = $(id);
         caja.className = 'resultado-entrada ' + clase;
         caja.innerHTML = `<strong>${escapar(titulo)}</strong>${detalle ? `<span>${escapar(detalle)}</span>` : ''}`;
         caja.hidden = false;
     }
 
-    async function validarEntrada(texto, manual) {
-        const codigo = String(texto).toUpperCase().replace(/[^A-Z0-9]/g, '');
-        // la cámara lee el mismo QR varias veces por segundo
-        if (validando || (!manual && codigo === ultimoCodigo && Date.now() - ultimoEn < 4000)) return;
-        validando = true;
-        ultimoCodigo = codigo;
-        const { data: r, error } = await db.rpc('validar_entrada', { p_codigo: codigo });
-        ultimoEn = Date.now();
-        validando = false;
+    const lugarEntrada = (r) => (r.localidad ? `${r.localidad} · N.º ${String(r.numero).padStart(4, '0')}` : '');
+    const horaCorta24 = (t) => new Date(t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+
+    const validarEntrada = (texto, manual) => codigoLeido(texto, manual, revisarEntrada);
+
+    async function revisarEntrada(codigo) {
+        const enTribuna = $('puertaControl').value === 'tribuna';
+        const { data: r, error } = await db.rpc(enTribuna ? 'validar_entrada_tribuna' : 'validar_entrada', { p_codigo: codigo });
 
         if (error) {
             pitar(false);
             mostrarResultado('aviso', 'No se pudo revisar', 'Sin conexión o sin permiso. Intenta otra vez. ' + error.message);
             return;
         }
-        const lugar = r.localidad ? `${r.localidad} · N.º ${String(r.numero).padStart(4, '0')}` : '';
+        const lugar = lugarEntrada(r);
+        const contar = () => {
+            $('contadorPuerta').textContent = `Desde este celular han pasado ${dejoPasar} personas`
+                + (enTribuna ? ` y ${reingresos} reingresos.` : '.');
+        };
         if (r.resultado === 'ok') {
             dejoPasar++;
-            $('contadorPuerta').textContent = `Desde este celular han pasado ${dejoPasar} personas.`;
+            contar();
             pitar(true);
-            mostrarResultado('ok', 'PASA', lugar);
+            mostrarResultado('ok', 'PASA', r.tribuna ? `${lugar}. Se vuelve a escanear en la puerta de tribuna.` : lugar);
+            return;
+        }
+        if (r.resultado === 'reingreso') {
+            reingresos++;
+            contar();
+            pitar(true);
+            const minutos = Math.round((Date.now() - new Date(r.anterior)) / 60000);
+            mostrarResultado('aviso', 'PASA: reingreso', `${lugar}. Es su ingreso n.º ${r.ingresos} a tribuna; el anterior fue hace ${minutos} min `
+                + `(entró por primera vez a las ${horaCorta24(r.primera)}).`);
             return;
         }
         pitar(false);
-        if (r.resultado === 'usada') {
+        if (r.resultado === 'devuelta') {
+            mostrarResultado('no', 'NO PASA: entrada devuelta', `${lugar}. Regresó a taquilla sin venderse, no vale.`);
+        } else if (r.resultado === 'no_es_tribuna') {
+            mostrarResultado('no', 'NO PASA: no es de tribuna', `${lugar}. Esta entrada no da acceso a tribuna.`);
+        } else if (r.resultado === 'sin_porton') {
+            mostrarResultado('no', 'NO PASA: no pasó por los portones', `${lugar}. Primero tiene que escanearse en la entrada general.`);
+        } else if (r.resultado === 'usada') {
             const hora = new Date(r.usada_en).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
             mostrarResultado('no', 'NO PASA: ya se usó', `${lugar}. Entró a las ${hora} (${r.usada_email || 'otro portero'}).`);
         } else if (r.resultado === 'otro_dia') {
@@ -2902,6 +2986,70 @@
             mostrarResultado('no', 'NO PASA: entrada no válida', 'El código no es de una entrada del club.');
         }
     }
+
+    // ---- Boletería: entradas devueltas sin vender (escaneadas o por rango de números) ----
+    const quitarDevueltas = () => $('deAccion').value === 'quitar';
+    const MENSAJES_DEVUELTA = {
+        ok: ['ok', 'DEVUELTA'],
+        quitada: ['ok', 'QUITADA'],
+        ya_devuelta: ['aviso', 'Ya estaba devuelta'],
+        no_devuelta: ['aviso', 'No estaba devuelta'],
+        usada: ['no', 'NO: esta entrada ya entró al estadio'],
+        otro_partido: ['no', 'NO: es de otro partido'],
+        no_taquilla: ['no', 'NO: es una entrada vendida en línea'],
+        no_existe: ['no', 'NO: el código no es de una entrada del club']
+    };
+
+    const marcarDevuelta = (texto, manual) => codigoLeido(texto, manual, async (codigo) => {
+        const { data: r, error } = await db.rpc('marcar_devuelta',
+            { p_partido_id: partidoActual.id, p_codigo: codigo, p_devuelta: !quitarDevueltas() });
+        if (error) {
+            pitar(false);
+            mostrarResultado('aviso', 'No se pudo marcar', error.message, 'resultadoDevuelta');
+            return;
+        }
+        const [clase, titulo] = MENSAJES_DEVUELTA[r.resultado] || ['aviso', r.resultado];
+        pitar(clase === 'ok');
+        mostrarResultado(clase, titulo, lugarEntrada(r), 'resultadoDevuelta');
+        if (clase === 'ok') await refrescarLocalidades();
+    });
+
+    $('btnCamaraDevueltas').addEventListener('click', () => (lector?.boton === 'btnCamaraDevueltas' ? apagarCamara()
+        : encenderCamara('lectorDevueltas', 'btnCamaraDevueltas', 'resultadoDevuelta', (t) => marcarDevuelta(t))));
+
+    $('devueltaCodigoForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        marcarDevuelta($('deCodigo').value, true);
+        $('deCodigo').value = '';
+    });
+
+    $('devueltasRangoForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const aviso = $('devueltasMensaje');
+        const quitar = quitarDevueltas();
+        const desde = Number($('deDesde').value), hasta = Number($('deHasta').value);
+        const nombre = $('deLocalidad').selectedOptions[0].textContent;
+        if (hasta < desde) {
+            avisar(aviso, 'El primer número tiene que ser menor o igual que el último.', 'error');
+            return;
+        }
+        if (!confirm(`¿${quitar ? 'Quitar de devueltas' : 'Marcar como devueltas'} las entradas de ${nombre} del N.º ${desde} al ${hasta}?`)) return;
+        $('btnDevueltasRango').disabled = true;
+        const { data: r, error } = await db.rpc('marcar_devueltas_rango', {
+            p_localidad_id: Number($('deLocalidad').value), p_desde: desde, p_hasta: hasta, p_devuelta: !quitar
+        });
+        $('btnDevueltasRango').disabled = false;
+        if (error) {
+            avisar(aviso, 'Error: ' + error.message, 'error');
+            return;
+        }
+        let texto = `${nombre}: ${r.cambiadas} ${quitar ? 'quitadas de devueltas' : 'marcadas como devueltas'}.`;
+        if (r.usadas) texto += ` ${r.usadas} de ese rango ya entraron al estadio y no se marcaron.`;
+        if (r.existen < hasta - desde + 1) texto += ` Solo ${r.existen} de esos números existen en esta localidad.`;
+        avisar(aviso, texto, r.usadas || !r.cambiadas ? 'error' : 'ok');
+        $('devueltasRangoForm').reset();
+        await refrescarLocalidades();
+    });
 
     // ---- Personal del club ----
     async function cargarPersonal() {
